@@ -326,18 +326,63 @@ function Location() {
           rel="noopener noreferrer"
           className="group block overflow-hidden rounded-2xl"
         >
-          <div className="relative h-56 w-full">
-            <img
-              src="https://staticmap.openstreetmap.de/staticmap.php?center=37.6372,127.0694&zoom=16&size=600x256&markers=37.6372,127.0694,red"
-              alt={`${data.venue.name} 지도`}
-              className="h-full w-full object-cover"
-              loading="lazy"
-            />
-            <div className="pointer-events-none absolute left-3 top-3 inline-flex items-center gap-1.5 rounded-full bg-[color:var(--color-blush-soft)]/95 px-3 py-1.5 shadow-sm">
-              <span className="inline-block h-2 w-2 rounded-full bg-[#03C75A]" />
-              <span className="text-[18px] font-semibold tracking-wider text-[color:var(--color-charcoal)]">NAVER MAP</span>
+          <div
+            className="relative h-56 w-full"
+            style={{
+              background:
+                "linear-gradient(135deg, #f0f7f0 0%, #e3efe0 40%, #eef2f6 100%)",
+            }}
+          >
+            <svg
+              className="absolute inset-0 h-full w-full"
+              viewBox="0 0 600 224"
+              preserveAspectRatio="xMidYMid slice"
+              aria-hidden="true"
+            >
+              <g stroke="#d7e2d4" strokeWidth="1.2" fill="none" opacity="0.8">
+                <path d="M0 56 L600 56" />
+                <path d="M0 112 L600 112" />
+                <path d="M0 168 L600 168" />
+                <path d="M120 0 L120 224" />
+                <path d="M260 0 L260 224" />
+                <path d="M400 0 L400 224" />
+                <path d="M520 0 L520 224" />
+              </g>
+              <path
+                d="M0 140 Q120 128 260 148 T520 132 T600 138"
+                stroke="#c6d6cc"
+                strokeWidth="14"
+                fill="none"
+                opacity="0.55"
+              />
+              <path
+                d="M70 0 L140 110 L80 224"
+                stroke="#e6d8c9"
+                strokeWidth="10"
+                fill="none"
+                opacity="0.6"
+              />
+              <circle cx="300" cy="112" r="60" fill="#ffffff" opacity="0.4" />
+            </svg>
+            <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-full">
+              <svg width="46" height="60" viewBox="0 0 46 60" aria-hidden="true">
+                <path
+                  d="M23 2 C11 2 2 11 2 23 C2 37 19 54 23 58 C27 54 44 37 44 23 C44 11 35 2 23 2 Z"
+                  fill="#03C75A"
+                  stroke="#ffffff"
+                  strokeWidth="2"
+                />
+                <circle cx="23" cy="22" r="7" fill="#ffffff" />
+              </svg>
             </div>
-            <div className="pointer-events-none absolute bottom-3 right-3 rounded-full bg-[color:var(--color-rose-deep)] px-3 py-1.5 text-[18px] tracking-widest text-white transition group-hover:bg-[color:var(--color-charcoal)]">
+            <div className="pointer-events-none absolute left-3 top-3 inline-flex items-center gap-1.5 rounded-full bg-white/95 px-3 py-1.5 shadow-sm">
+              <span className="inline-block h-2 w-2 rounded-full bg-[#03C75A]" />
+              <span className="text-[13px] font-semibold tracking-wider text-[color:var(--color-charcoal)]">NAVER MAP</span>
+            </div>
+            <div className="pointer-events-none absolute left-1/2 top-[62%] -translate-x-1/2 whitespace-nowrap rounded-md bg-white/95 px-3 py-1 text-[12px] font-medium tracking-wider text-[color:var(--color-charcoal)] shadow-sm">
+              {data.venue.name}
+            </div>
+            <div className="pointer-events-none absolute bottom-3 right-3 rounded-full bg-[color:var(--color-rose-deep)] px-3 py-1.5 text-[12px] tracking-widest text-white transition group-hover:bg-[color:var(--color-charcoal)]">
               네이버 지도 열기 →
             </div>
           </div>
@@ -563,6 +608,27 @@ function MiniGame() {
       if (raw) setBest(parseInt(raw, 10) || 0);
     } catch {}
   }, []);
+
+  // idle 상태에서도 캔버스에 기본 배경 + 레인 가이드 그려둔다 (빈 박스 방지)
+  useEffect(() => {
+    if (state === "playing") return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.fillStyle = "#fdfbf7";
+    ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = "rgba(232, 147, 120, 0.18)";
+    ctx.lineWidth = 1;
+    for (let i = 1; i < 3; i++) {
+      ctx.beginPath();
+      ctx.moveTo(LANE_W * i, 0);
+      ctx.lineTo(LANE_W * i, H);
+      ctx.stroke();
+    }
+    // 대기용 플레이어 하트
+    drawHeart(ctx, LANE_W * 1.5, H - 70, 15, "#e89378");
+  }, [state, LANE_W]);
 
   const syncState = useCallback((s: GameState) => {
     stateRef.current = s;
@@ -799,7 +865,7 @@ function MiniGame() {
 
           <div
             className="relative overflow-hidden rounded-2xl border border-[color:var(--color-rose)]/25 bg-[#fdfbf7]"
-            style={{ touchAction: "none" }}
+            style={{ touchAction: state === "playing" ? "none" : "auto" }}
             onTouchStart={onTouchStart}
             onTouchEnd={onTouchEnd}
           >
@@ -876,15 +942,27 @@ function GameOverlay({
   btn: string;
   onClick: () => void;
 }) {
+  const handle = (e: React.SyntheticEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    onClick();
+  };
   return (
-    <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-[color:var(--color-blush)]/85 backdrop-blur-sm text-center px-6">
+    <div
+      className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-4 bg-[color:var(--color-blush)]/90 backdrop-blur-sm text-center px-6"
+      onTouchStart={(e) => e.stopPropagation()}
+      onTouchEnd={(e) => e.stopPropagation()}
+      style={{ touchAction: "auto" }}
+    >
       <p className="text-lg text-[color:var(--color-charcoal)]">{title}</p>
       <p className="text-[13px] leading-relaxed text-[color:var(--color-charcoal)]/75 whitespace-pre-line">
         {description}
       </p>
       <button
-        onClick={onClick}
-        className="rounded-full bg-[color:var(--color-rose-deep)] px-6 py-2.5 text-[12px] tracking-[0.3em] text-white"
+        type="button"
+        onClick={handle}
+        onTouchEnd={handle}
+        className="rounded-full bg-[color:var(--color-rose-deep)] px-8 py-3 text-[13px] tracking-[0.3em] text-white shadow-md active:scale-95"
       >
         {btn}
       </button>
