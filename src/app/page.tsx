@@ -602,10 +602,219 @@ const TOWN_LINES: string[] = [
   "식장이 보인다. 문을 연다…",
 ];
 
+// ─────────────────────────────────────────────────────────
+//  게임 오디오 엔진 — Web Audio API 절차적 8비트 합성
+//  저작권 안전: 모든 멜로디/SFX는 런타임에 직접 생성, 외부 음원 의존 0
+// ─────────────────────────────────────────────────────────
+
+type BgmTrack = "intro" | "home" | "town" | "runner" | "cleared" | "over" | null;
+
+// 반음 주파수 (A4=440 기준, MIDI 69)
+function midiToHz(m: number): number {
+  return 440 * Math.pow(2, (m - 69) / 12);
+}
+
+// Phase별 8비트 루프 멜로디 — 오리지널 작곡 (IP 안전)
+// 포맷: [midi노트 또는 0(쉼표), 박자 길이]
+const BGM_PATTERNS: Record<Exclude<BgmTrack, null>, { bpm: number; notes: [number, number][]; bass: [number, number][] }> = {
+  // 인트로: 잔잔한 아르페지오 C-G-Am-F
+  intro: {
+    bpm: 88,
+    notes: [[72, 1], [76, 1], [79, 1], [76, 1], [71, 1], [74, 1], [79, 1], [74, 1], [69, 1], [72, 1], [76, 1], [72, 1], [65, 1], [69, 1], [72, 1], [69, 1]],
+    bass: [[48, 4], [43, 4], [45, 4], [41, 4]],
+  },
+  // 집: 아침 마을 — 경쾌하지만 여유
+  home: {
+    bpm: 112,
+    notes: [[72, 1], [74, 1], [76, 2], [79, 1], [76, 1], [74, 2], [72, 1], [74, 1], [76, 1], [74, 1], [72, 1], [69, 1], [72, 4]],
+    bass: [[48, 2], [55, 2], [53, 2], [52, 2], [48, 2], [55, 2], [50, 2], [55, 2]],
+  },
+  // 마을: 보행 느낌 — 스텝 바운스
+  town: {
+    bpm: 124,
+    notes: [[76, 1], [79, 1], [81, 1], [83, 1], [84, 2], [81, 1], [79, 1], [77, 1], [76, 1], [74, 2], [72, 1], [74, 1], [76, 2], [77, 1], [79, 1]],
+    bass: [[52, 2], [59, 2], [57, 2], [55, 2], [53, 2], [57, 2], [52, 2], [55, 2]],
+  },
+  // 러너: 빠른 템포 — 긴박감
+  runner: {
+    bpm: 156,
+    notes: [[76, 1], [79, 1], [84, 1], [79, 1], [77, 1], [81, 1], [84, 1], [81, 1], [74, 1], [77, 1], [82, 1], [77, 1], [76, 1], [79, 1], [84, 2]],
+    bass: [[40, 1], [52, 1], [40, 1], [52, 1], [41, 1], [53, 1], [41, 1], [53, 1], [38, 1], [50, 1], [38, 1], [50, 1], [40, 1], [52, 1], [40, 2]],
+  },
+  // 클리어: 축하 팡파레 (웨딩 행진 오마주 — 오리지널 멜로디)
+  cleared: {
+    bpm: 100,
+    notes: [[72, 2], [72, 1], [74, 1], [76, 4], [72, 2], [72, 1], [74, 1], [79, 4], [77, 1], [76, 1], [74, 1], [72, 1], [74, 2], [72, 2]],
+    bass: [[48, 4], [48, 4], [53, 4], [48, 4]],
+  },
+  // 오버: 다운 코드
+  over: {
+    bpm: 72,
+    notes: [[67, 2], [65, 2], [63, 2], [60, 4]],
+    bass: [[48, 4], [43, 4]],
+  },
+};
+
+type AudioEngine = {
+  ensureStarted: () => void;
+  playBgm: (track: BgmTrack) => void;
+  stopBgm: () => void;
+  sfx: (kind: "dialog" | "pickup" | "hit" | "win" | "lose" | "jump") => void;
+  setMuted: (m: boolean) => void;
+  getMuted: () => boolean;
+};
+
+function useAudioEngine(): AudioEngine {
+  const ctxRef = useRef<AudioContext | null>(null);
+  const masterRef = useRef<GainNode | null>(null);
+  const bgmGainRef = useRef<GainNode | null>(null);
+  const mutedRef = useRef<boolean>(false);
+  const bgmTimerRef = useRef<number | null>(null);
+  const currentTrackRef = useRef<BgmTrack>(null);
+
+  // 초기 음소거 상태 로드
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("wedding_audio_muted_v1");
+      mutedRef.current = raw === "1";
+    } catch {}
+  }, []);
+
+  const ensureStarted = useCallback(() => {
+    if (ctxRef.current) {
+      if (ctxRef.current.state === "suspended") ctxRef.current.resume().catch(() => {});
+      return;
+    }
+    try {
+      const AC = (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext);
+      const ctx = new AC();
+      const master = ctx.createGain();
+      master.gain.value = mutedRef.current ? 0 : 0.5;
+      master.connect(ctx.destination);
+      const bgmGain = ctx.createGain();
+      bgmGain.gain.value = 0.35;
+      bgmGain.connect(master);
+      ctxRef.current = ctx;
+      masterRef.current = master;
+      bgmGainRef.current = bgmGain;
+    } catch {}
+  }, []);
+
+  const stopBgm = useCallback(() => {
+    if (bgmTimerRef.current !== null) {
+      window.clearInterval(bgmTimerRef.current);
+      bgmTimerRef.current = null;
+    }
+    currentTrackRef.current = null;
+  }, []);
+
+  const playBgm = useCallback((track: BgmTrack) => {
+    ensureStarted();
+    if (currentTrackRef.current === track) return;
+    stopBgm();
+    currentTrackRef.current = track;
+    if (!track) return;
+    const ctx = ctxRef.current;
+    const bgmGain = bgmGainRef.current;
+    if (!ctx || !bgmGain) return;
+    const pat = BGM_PATTERNS[track];
+    const beatSec = 60 / pat.bpm / 2; // 1박 = 8분음표
+    let startAt = ctx.currentTime + 0.05;
+    const notesDur = pat.notes.reduce((a, b) => a + b[1], 0) * beatSec;
+    const bassDur = pat.bass.reduce((a, b) => a + b[1], 0) * beatSec;
+    const loopDur = Math.max(notesDur, bassDur);
+
+    const scheduleLoop = (t0: number) => {
+      let t = t0;
+      for (const [m, len] of pat.notes) {
+        if (m > 0) playBlip(ctx, bgmGain, midiToHz(m), t, len * beatSec * 0.92, "square", 0.22);
+        t += len * beatSec;
+      }
+      let bt = t0;
+      for (const [m, len] of pat.bass) {
+        if (m > 0) playBlip(ctx, bgmGain, midiToHz(m), bt, len * beatSec * 0.85, "triangle", 0.35);
+        bt += len * beatSec;
+      }
+    };
+
+    scheduleLoop(startAt);
+    bgmTimerRef.current = window.setInterval(() => {
+      startAt += loopDur;
+      scheduleLoop(startAt);
+    }, loopDur * 1000 - 40);
+  }, [ensureStarted, stopBgm]);
+
+  const sfx = useCallback((kind: "dialog" | "pickup" | "hit" | "win" | "lose" | "jump") => {
+    ensureStarted();
+    const ctx = ctxRef.current;
+    const master = masterRef.current;
+    if (!ctx || !master) return;
+    const t = ctx.currentTime;
+    if (kind === "dialog") {
+      playBlip(ctx, master, 880, t, 0.05, "square", 0.18);
+    } else if (kind === "pickup") {
+      playBlip(ctx, master, 880, t, 0.08, "square", 0.25);
+      playBlip(ctx, master, 1320, t + 0.06, 0.1, "square", 0.22);
+    } else if (kind === "hit") {
+      playBlip(ctx, master, 160, t, 0.18, "sawtooth", 0.3);
+    } else if (kind === "jump") {
+      playBlip(ctx, master, 440, t, 0.08, "square", 0.22);
+      playBlip(ctx, master, 660, t + 0.05, 0.06, "square", 0.2);
+    } else if (kind === "win") {
+      [72, 76, 79, 84].forEach((m, i) => playBlip(ctx, master, midiToHz(m), t + i * 0.08, 0.18, "square", 0.28));
+    } else if (kind === "lose") {
+      [72, 67, 63, 58].forEach((m, i) => playBlip(ctx, master, midiToHz(m), t + i * 0.12, 0.22, "sawtooth", 0.25));
+    }
+  }, [ensureStarted]);
+
+  const setMuted = useCallback((m: boolean) => {
+    mutedRef.current = m;
+    try { localStorage.setItem("wedding_audio_muted_v1", m ? "1" : "0"); } catch {}
+    const master = masterRef.current;
+    const ctx = ctxRef.current;
+    if (master && ctx) master.gain.setTargetAtTime(m ? 0 : 0.5, ctx.currentTime, 0.05);
+  }, []);
+
+  const getMuted = useCallback(() => mutedRef.current, []);
+
+  // 언마운트 시 정리
+  useEffect(() => () => { stopBgm(); ctxRef.current?.close().catch(() => {}); }, [stopBgm]);
+
+  return useMemo(
+    () => ({ ensureStarted, playBgm, stopBgm, sfx, setMuted, getMuted }),
+    [ensureStarted, playBgm, stopBgm, sfx, setMuted, getMuted]
+  );
+}
+
+// 단발 톤 — 오실레이터 + ADSR
+function playBlip(
+  ctx: AudioContext,
+  dest: AudioNode,
+  freq: number,
+  when: number,
+  dur: number,
+  type: OscillatorType,
+  vol: number
+) {
+  const osc = ctx.createOscillator();
+  const g = ctx.createGain();
+  osc.type = type;
+  osc.frequency.value = freq;
+  g.gain.setValueAtTime(0, when);
+  g.gain.linearRampToValueAtTime(vol, when + 0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001, when + dur);
+  osc.connect(g);
+  g.connect(dest);
+  osc.start(when);
+  osc.stop(when + dur + 0.02);
+}
+
 function WeddingAdventure() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [phase, setPhase] = useState<Phase>("intro");
   const phaseRef = useRef<Phase>("intro");
+  const audio = useAudioEngine();
+  const [muted, setMutedState] = useState(false);
   const [sex, setSex] = useState<Sex>("groom");
   const sexRef = useRef<Sex>("groom");
   const [nickname, setNickname] = useState("");
@@ -655,11 +864,13 @@ function WeddingAdventure() {
   const rafRef = useRef<number | null>(null);
   const lastTsRef = useRef<number | null>(null);
 
-  // best 스코어 로드
+  // best 스코어 + 음소거 상태 로드
   useEffect(() => {
     try {
       const raw = localStorage.getItem("wedding_adventure_best_v1");
       if (raw) setBest(parseInt(raw, 10) || 0);
+      const m = localStorage.getItem("wedding_audio_muted_v1") === "1";
+      setMutedState(m);
     } catch {}
   }, []);
 
@@ -671,7 +882,11 @@ function WeddingAdventure() {
     dialogCharsRef.current = 0;
     setDialogIdx(0);
     setDialogChars(0);
-  }, []);
+    // phase별 BGM 스왑
+    if (p === "cleared") audio.sfx("win");
+    else if (p === "over") audio.sfx("lose");
+    audio.playBgm(p as BgmTrack);
+  }, [audio]);
 
   const startRunner = useCallback(() => {
     scoreRef.current = 0;
@@ -709,6 +924,7 @@ function WeddingAdventure() {
     if (dialogCharsRef.current < full.length) {
       dialogCharsRef.current = full.length;
       setDialogChars(full.length);
+      audio.sfx("dialog");
       return;
     }
     const next = dialogIdxRef.current + 1;
@@ -716,6 +932,7 @@ function WeddingAdventure() {
       onDone();
       return;
     }
+    audio.sfx("dialog");
     dialogIdxRef.current = next;
     dialogCharsRef.current = 0;
     setDialogIdx(next);
@@ -875,18 +1092,18 @@ function WeddingAdventure() {
           it.y += dt * 180;
           if (Math.abs(it.y - playerY) < 20 && it.lane === playerLane) {
             // 충돌
-            if (it.kind === "ring") { scoreRef.current += 100; it.y = VH + 99; }
-            else if (it.kind === "heart") { scoreRef.current += 50; it.y = VH + 99; }
-            else if (it.kind === "bouquet") { scoreRef.current += 300; it.y = VH + 99; }
-            else if (it.kind === "champagne") { scoreRef.current += 150; invincRef.current = 3; it.y = VH + 99; }
+            if (it.kind === "ring") { scoreRef.current += 100; it.y = VH + 99; audio.sfx("pickup"); }
+            else if (it.kind === "heart") { scoreRef.current += 50; it.y = VH + 99; audio.sfx("pickup"); }
+            else if (it.kind === "bouquet") { scoreRef.current += 300; it.y = VH + 99; audio.sfx("pickup"); }
+            else if (it.kind === "champagne") { scoreRef.current += 150; invincRef.current = 3; it.y = VH + 99; audio.sfx("pickup"); }
             else if (it.kind === "envelope") {
-              if (invincRef.current <= 0) scoreRef.current = Math.max(0, scoreRef.current - 100);
+              if (invincRef.current <= 0) { scoreRef.current = Math.max(0, scoreRef.current - 100); audio.sfx("hit"); }
               it.y = VH + 99;
             } else if (it.kind === "kid") {
-              if (invincRef.current <= 0) { livesRef.current -= 1; scoreRef.current = Math.max(0, scoreRef.current - 200); }
+              if (invincRef.current <= 0) { livesRef.current -= 1; scoreRef.current = Math.max(0, scoreRef.current - 200); audio.sfx("hit"); }
               it.y = VH + 99;
             } else if (it.kind === "cake") {
-              if (invincRef.current <= 0) { livesRef.current = 0; }
+              if (invincRef.current <= 0) { livesRef.current = 0; audio.sfx("hit"); }
               else { it.y = VH + 99; }
             }
             setScore(scoreRef.current);
@@ -928,7 +1145,7 @@ function WeddingAdventure() {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       lastTsRef.current = null;
     };
-  }, [endRunner, nickname]);
+  }, [endRunner, nickname, audio]);
 
   // 캔버스 클릭/탭 = 대사 진행 or 레인 이동 안내
   const onCanvasClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -966,6 +1183,22 @@ function WeddingAdventure() {
               className="w-full h-auto rounded-lg border border-[color:var(--color-rose)]/30 block"
               style={{ imageRendering: "pixelated", touchAction: "manipulation", aspectRatio: `${VW}/${VH}` }}
             />
+            {/* 음소거 토글 — 캔버스 우상단 */}
+            <button
+              type="button"
+              aria-label={muted ? "배경음 켜기" : "배경음 끄기"}
+              onClick={(e) => {
+                e.stopPropagation();
+                audio.ensureStarted();
+                const next = !muted;
+                audio.setMuted(next);
+                setMutedState(next);
+                if (!next && phaseRef.current) audio.playBgm(phaseRef.current as BgmTrack);
+              }}
+              className="absolute top-2 right-2 w-9 h-9 rounded-full bg-white/85 border border-[color:var(--color-rose)]/40 text-[14px] shadow-sm"
+            >
+              {muted ? "🔇" : "🔊"}
+            </button>
 
             {/* Phase별 HUD/오버레이 */}
             {phase === "intro" && (
@@ -980,14 +1213,26 @@ function WeddingAdventure() {
                 <div className="flex gap-2">
                   <button
                     type="button"
-                    onClick={() => { sexRef.current = "groom"; setSex("groom"); }}
+                    onClick={() => {
+                      audio.ensureStarted();
+                      audio.playBgm("intro");
+                      sexRef.current = "groom";
+                      setSex("groom");
+                      audio.sfx("pickup");
+                    }}
                     className={`flex-1 py-3 rounded-md text-[12px] tracking-widest border ${sex === "groom" ? "bg-[color:var(--color-rose-deep)] text-white border-transparent" : "border-[color:var(--color-rose)]/40"}`}
                   >
                     🤵 채종현 (신랑)
                   </button>
                   <button
                     type="button"
-                    onClick={() => { sexRef.current = "bride"; setSex("bride"); }}
+                    onClick={() => {
+                      audio.ensureStarted();
+                      audio.playBgm("intro");
+                      sexRef.current = "bride";
+                      setSex("bride");
+                      audio.sfx("pickup");
+                    }}
                     className={`flex-1 py-3 rounded-md text-[12px] tracking-widest border ${sex === "bride" ? "bg-[color:var(--color-rose-deep)] text-white border-transparent" : "border-[color:var(--color-rose)]/40"}`}
                   >
                     👰 최수빈 (신부)
@@ -998,7 +1243,7 @@ function WeddingAdventure() {
                 </p>
                 <button
                   type="button"
-                  onClick={() => setPhaseBoth("runner")}
+                  onClick={() => { audio.ensureStarted(); setPhaseBoth("runner"); }}
                   className="mt-1 py-2 rounded-md bg-white/70 border border-[color:var(--color-rose)]/30 text-[11px] tracking-widest opacity-80"
                 >
                   ⏭ 오프닝 스킵 → 러너로
