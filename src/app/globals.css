@@ -1,0 +1,59 @@
+@import "tailwindcss";
+
+:root {
+  /* 웨딩 톤앤매너: 아이보리 + 웜그레이 + 골드 */
+  --bg: #faf7f2;
+  --bg-soft: #f3ede2;
+  --ink: #2a2724;
+  --ink-soft: #6b6359;
+  --line: #e3dccf;
+  --gold: #b89968;
+  --gold-soft: #d6b98a;
+
+  /* 기본 폰트는 Noto Serif KR (명조) */
+  --font-active: var(--font-noto-serif);
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-bg-soft: var(--bg-soft);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-line: var(--line);
+  --color-gold: var(--gold);
+  --color-gold-soft: var(--gold-soft);
+  --font-active: var(--font-active);
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-active), "Noto Serif KR", serif;
+  letter-spacing: -0.01em;
+}
+
+/* 모바일 청첩장 컨테이너 — 데스크톱에서도 모바일 폭으로 중앙 정렬 */
+.invitation {
+  max-width: 28rem;
+  margin: 0 auto;
+  background: #fffefb;
+  box-shadow: 0 0 60px rgba(40, 30, 20, 0.06);
+  min-height: 100vh;
+}
+
+/* 골드 가는 라인 디바이더 */
+.divider {
+  display: block;
+  width: 1px;
+  height: 48px;
+  margin: 0 auto;
+  background: var(--gold-soft);
+}
+
+.divider-h {
+  display: block;
+  height: 1px;
+  width: 80%;
+  margin: 0 auto;
+  background: var(--line);
+}
