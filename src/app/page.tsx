@@ -142,14 +142,18 @@ function Hero() {
         <ellipse cx="64" cy="44" rx="5" ry="1.8" />
         <ellipse cx="116" cy="44" rx="5" ry="1.8" />
       </svg>
-      <div className="fade-in">
+      <div className="fade-in w-full max-w-[22rem]">
         <p className="eyebrow mb-6">We Invite You</p>
-        <h1 className="text-[clamp(1.9rem,8.5vw,2.6rem)] leading-tight text-[color:var(--color-charcoal)] whitespace-nowrap">{data.groom.nameEn}</h1>
-        <p className="my-3 italic text-base text-[color:var(--color-rose-deep)]">&amp;</p>
-        <h1 className="text-[clamp(1.9rem,8.5vw,2.6rem)] leading-tight text-[color:var(--color-charcoal)] whitespace-nowrap">{data.bride.nameEn}</h1>
+        <h1 className="text-[clamp(1.45rem,7vw,2.1rem)] leading-[1.15] text-[color:var(--color-charcoal)] break-words">
+          {data.groom.nameEn}
+        </h1>
+        <p className="my-2 italic text-base text-[color:var(--color-rose-deep)]">&amp;</p>
+        <h1 className="text-[clamp(1.45rem,7vw,2.1rem)] leading-[1.15] text-[color:var(--color-charcoal)] break-words">
+          {data.bride.nameEn}
+        </h1>
         <FlowerDivider />
-        <p className="mt-2 text-[clamp(11px,3.4vw,14px)] tracking-[0.22em] text-[color:var(--color-mute)] whitespace-nowrap">2026. 11. 15 · 일</p>
-        <p className="mt-2 text-[clamp(10px,3vw,12px)] tracking-[0.18em] text-[color:var(--color-mute)] whitespace-nowrap">{data.venue.name}</p>
+        <p className="mt-2 text-[clamp(11px,3.4vw,14px)] tracking-[0.22em] text-[color:var(--color-mute)]">2026. 11. 15 · 일</p>
+        <p className="mt-2 text-[clamp(10px,3vw,12px)] tracking-[0.18em] text-[color:var(--color-mute)]">{data.venue.name}</p>
       </div>
       <div className="absolute bottom-8 label-caps text-[color:var(--color-mute)] animate-pulse">SCROLL</div>
     </section>
@@ -609,6 +613,16 @@ const TOWN_LINES: string[] = [
   "…반갑다고 인사했다.",
   "식장이 보인다. 문을 연다…",
 ];
+// 추격자 랜덤 대사 — 러너 중 파트너 머리 위 말풍선에 랜덤으로 표출
+const CHASER_LINES: string[] = [
+  "거기서!!",
+  "잡히면 가만안둬?!",
+  "어디 가!",
+  "오늘 결혼식이야!",
+  "도망 못 가요 ㅋ",
+  "식장까지 같이 가자!",
+  "기다려~!",
+];
 
 // ─────────────────────────────────────────────────────────
 //  게임 오디오 엔진 — Web Audio API 절차적 8비트 합성
@@ -875,6 +889,11 @@ function WeddingAdventure({ onComplete }: { onComplete?: () => void } = {}) {
   // 추격자(파트너) — 플레이어보다 더 뒤에서 따라옴. 피격 시 간격 줄어들어 잡힘
   const partnerGapRef = useRef(PARTNER_GAP_START);
   const partnerBounceRef = useRef(0);
+  // 추격자 대사 — 주기적으로 랜덤 문구가 말풍선으로 표출됨
+  const chaserLineRef = useRef<string>("");
+  const chaserLineAlphaRef = useRef(0);
+  const chaserLineTTLRef = useRef(0);
+  const chaserNextTimerRef = useRef(2.5);
 
   // RAF 루프
   const rafRef = useRef<number | null>(null);
@@ -928,6 +947,10 @@ function WeddingAdventure({ onComplete }: { onComplete?: () => void } = {}) {
     runScrollRef.current = 0;
     partnerGapRef.current = PARTNER_GAP_START;
     partnerBounceRef.current = 0;
+    chaserLineRef.current = "";
+    chaserLineAlphaRef.current = 0;
+    chaserLineTTLRef.current = 0;
+    chaserNextTimerRef.current = 2.5;
     setScore(0);
     setRemain(RUN_DURATION);
     setLives(3);
@@ -1147,6 +1170,31 @@ function WeddingAdventure({ onComplete }: { onComplete?: () => void } = {}) {
         partnerGapRef.current = Math.min(PARTNER_GAP_MAX, partnerGapRef.current + dt * 6);
         partnerBounceRef.current += dt * 10;
 
+        // 추격자 말풍선 타이머 — 대사 유지 / 페이드아웃 / 다음 대사 스케줄
+        if (chaserLineTTLRef.current > 0) {
+          chaserLineTTLRef.current -= dt;
+          // 마지막 0.6s는 페이드아웃
+          chaserLineAlphaRef.current =
+            chaserLineTTLRef.current < 0.6
+              ? Math.max(0, chaserLineTTLRef.current / 0.6)
+              : 1;
+          if (chaserLineTTLRef.current <= 0) {
+            chaserLineRef.current = "";
+            chaserLineAlphaRef.current = 0;
+            // 다음 대사까지 6~12초 랜덤 대기
+            chaserNextTimerRef.current = 6 + Math.random() * 6;
+          }
+        } else {
+          chaserNextTimerRef.current -= dt;
+          if (chaserNextTimerRef.current <= 0) {
+            const line =
+              CHASER_LINES[Math.floor(Math.random() * CHASER_LINES.length)] ?? "";
+            chaserLineRef.current = line;
+            chaserLineTTLRef.current = 2.6; // 노출 시간
+            chaserLineAlphaRef.current = 1;
+          }
+        }
+
         // 스폰
         spawnRef.current -= dt;
         if (spawnRef.current <= 0) {
@@ -1248,6 +1296,8 @@ function WeddingAdventure({ onComplete }: { onComplete?: () => void } = {}) {
           score: scoreRef.current,
           lives: livesRef.current,
           scroll: runScrollRef.current,
+          chaserLine: chaserLineRef.current,
+          chaserLineAlpha: chaserLineAlphaRef.current,
         },
         nickname,
       });
@@ -1317,7 +1367,63 @@ function WeddingAdventure({ onComplete }: { onComplete?: () => void } = {}) {
 
             {/* Phase별 HUD/오버레이 */}
             {phase === "intro" && (
-              <div className="mt-3 flex flex-col gap-2">
+              <div className="mt-3 flex flex-col gap-3">
+                {/* 캐릭터 선택 — 맨 위로 배치, 시각적 강조 */}
+                <div className="rounded-xl border border-[color:var(--color-rose)]/40 bg-white/75 p-3">
+                  <p className="mb-2 text-center text-[11px] tracking-[0.22em] text-[color:var(--color-rose-deep)]">
+                    ▼ 도망가는 캐릭터를 선택하세요
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        audio.ensureStarted();
+                        audio.playBgm("intro");
+                        sexRef.current = "groom";
+                        setSex("groom");
+                        audio.sfx("pickup");
+                      }}
+                      className={`relative flex flex-col items-center gap-1 rounded-lg py-3 text-[12px] tracking-widest transition ${
+                        sex === "groom"
+                          ? "bg-[color:var(--color-rose-deep)] text-white ring-2 ring-[color:var(--color-rose-deep)] ring-offset-2"
+                          : "border border-[color:var(--color-rose)]/40 bg-white text-[color:var(--color-charcoal)]"
+                      }`}
+                    >
+                      <span className="text-2xl leading-none">🤵</span>
+                      <span>채종현</span>
+                      <span className="text-[10px] opacity-80">신랑</span>
+                      {sex === "groom" && (
+                        <span className="absolute right-2 top-2 text-[12px]">✓</span>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        audio.ensureStarted();
+                        audio.playBgm("intro");
+                        sexRef.current = "bride";
+                        setSex("bride");
+                        audio.sfx("pickup");
+                      }}
+                      className={`relative flex flex-col items-center gap-1 rounded-lg py-3 text-[12px] tracking-widest transition ${
+                        sex === "bride"
+                          ? "bg-[color:var(--color-rose-deep)] text-white ring-2 ring-[color:var(--color-rose-deep)] ring-offset-2"
+                          : "border border-[color:var(--color-rose)]/40 bg-white text-[color:var(--color-charcoal)]"
+                      }`}
+                    >
+                      <span className="text-2xl leading-none">👰</span>
+                      <span>최수빈</span>
+                      <span className="text-[10px] opacity-80">신부</span>
+                      {sex === "bride" && (
+                        <span className="absolute right-2 top-2 text-[12px]">✓</span>
+                      )}
+                    </button>
+                  </div>
+                  <p className="mt-2 text-center text-[10px] tracking-widest opacity-60">
+                    선택한 반대 파트너가 뒤에서 쫓아옵니다
+                  </p>
+                </div>
+
                 <label className="text-[11px] tracking-widest opacity-70">내 이름 (선택)</label>
                 <input
                   value={nickname}
@@ -1325,43 +1431,19 @@ function WeddingAdventure({ onComplete }: { onComplete?: () => void } = {}) {
                   placeholder="리더보드 표시용"
                   className="px-3 py-2 rounded-md bg-white/70 border border-[color:var(--color-rose)]/30 text-[13px]"
                 />
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      audio.ensureStarted();
-                      audio.playBgm("intro");
-                      sexRef.current = "groom";
-                      setSex("groom");
-                      audio.sfx("pickup");
-                    }}
-                    className={`flex-1 py-3 rounded-md text-[12px] tracking-widest border ${sex === "groom" ? "bg-[color:var(--color-rose-deep)] text-white border-transparent" : "border-[color:var(--color-rose)]/40"}`}
-                  >
-                    🤵 채종현 (신랑)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      audio.ensureStarted();
-                      audio.playBgm("intro");
-                      sexRef.current = "bride";
-                      setSex("bride");
-                      audio.sfx("pickup");
-                    }}
-                    className={`flex-1 py-3 rounded-md text-[12px] tracking-widest border ${sex === "bride" ? "bg-[color:var(--color-rose-deep)] text-white border-transparent" : "border-[color:var(--color-rose)]/40"}`}
-                  >
-                    👰 최수빈 (신부)
-                  </button>
-                </div>
-                <p className="text-[10px] tracking-widest opacity-55 text-center">
-                  선택한 반대 파트너가 러너에서 뒤따라옵니다
-                </p>
                 <button
                   type="button"
                   onClick={() => { audio.ensureStarted(); setPhaseBoth("runner"); }}
-                  className="mt-1 py-2 rounded-md bg-white/70 border border-[color:var(--color-rose)]/30 text-[11px] tracking-widest opacity-80"
+                  className="py-3 rounded-md bg-[color:var(--color-rose-deep)] text-white text-[12px] tracking-[0.22em]"
                 >
-                  ⏭ 오프닝 스킵 → 러너로
+                  ▶ 게임 시작
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { audio.ensureStarted(); setPhaseBoth("runner"); }}
+                  className="py-2 rounded-md bg-white/60 border border-[color:var(--color-rose)]/30 text-[11px] tracking-widest opacity-70"
+                >
+                  ⏭ 오프닝 스킵
                 </button>
               </div>
             )}
@@ -1448,6 +1530,8 @@ type DrawCtx = {
     score: number;
     lives: number;
     scroll: number;
+    chaserLine: string;
+    chaserLineAlpha: number;
   };
   nickname: string;
 };
@@ -1867,19 +1951,16 @@ function drawRunner(ctx: CanvasRenderingContext2D, c: DrawCtx) {
     drawRunnerItem(ctx, it.x, it.y, it.kind, t);
   }
 
-  // 파트너(추격자) — 플레이어 뒤쪽
+  // 파트너(추격자) — 플레이어 뒤쪽 (평상시엔 밧줄 없음, 손만 흔듦)
   const partnerSex: Sex = c.sex === "groom" ? "bride" : "groom";
   const partnerX = Math.max(8, PLAYER_X - c.runner.partnerGap);
   const partnerBob = Math.sin(c.runner.partnerBounce) * 1.2;
   drawRunnerHero(ctx, partnerX, GROUND_Y + partnerBob, partnerSex, "grounded", t, true);
-  // 손에 든 밧줄 (추격 연출)
-  ctx.strokeStyle = "rgba(90,40,40,0.65)";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(partnerX + 6, GROUND_Y - 12);
-  const ropeEnd = PLAYER_X - 8;
-  ctx.quadraticCurveTo((partnerX + ropeEnd) / 2, GROUND_Y - 18 + Math.sin(t * 6) * 2, ropeEnd, GROUND_Y - 16);
-  ctx.stroke();
+
+  // 추격자 말풍선 — 주기적으로 랜덤 대사 노출
+  if (c.runner.chaserLine && c.runner.chaserLineAlpha > 0) {
+    drawChaserBubble(ctx, partnerX, GROUND_Y - 30, c.runner.chaserLine, c.runner.chaserLineAlpha);
+  }
 
   // 플레이어
   const blinking = c.runner.invinc > 0 && Math.floor(c.runner.invinc * 10) % 2 === 0;
@@ -1987,15 +2068,14 @@ function drawRunnerHero(
   ctx.fillStyle = "#1a1a1a";
   ctx.fillRect(2, -21, 1, 2);
 
-  // 팔 — 뛰는 느낌. 파트너는 밧줄 당기는 앞팔
+  // 팔 — 뛰는 느낌. 파트너도 달리는 팔 스윙 (밧줄 당기는 동작 제거)
   ctx.fillStyle = isGroom ? "#1f2a44" : "#f8efe8";
-  if (isPartner) {
-    // 앞으로 뻗은 팔 (밧줄 당기기)
-    ctx.fillRect(4, -12, 6, 2);
-  } else {
+  {
     const armSwing = legSwap ? -2 : 2;
-    ctx.fillRect(-5, -11 + armSwing, 2, 5);
-    ctx.fillRect(4, -11 - armSwing, 2, 5);
+    // 파트너는 오프셋을 살짝 달리해 추격 중 느낌
+    const swingOffset = isPartner ? 0 : 0;
+    ctx.fillRect(-5, -11 + armSwing + swingOffset, 2, 5);
+    ctx.fillRect(4, -11 - armSwing + swingOffset, 2, 5);
   }
 
   // 다리 — 횡 달리기 프레임
@@ -2170,20 +2250,14 @@ function drawEnding(ctx: CanvasRenderingContext2D, c: DrawCtx, cleared: boolean)
   const catcherX = 70;
   // 플레이어 오른쪽 — 밧줄에 끌려와 기울어져 있음
   const caughtX = VW - 90;
-  // 밧줄 (곡선)
-  const shake = Math.sin(t * 3) * 1.5;
-  ctx.strokeStyle = "#c9a06a";
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(catcherX + 6, GY - 18);
-  ctx.quadraticCurveTo((catcherX + caughtX) / 2, GY - 30 + shake, caughtX - 4, GY - 20);
-  ctx.stroke();
-  // 밧줄 고리 (플레이어 몸에 감긴)
-  ctx.strokeStyle = "#c9a06a";
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.ellipse(caughtX, GY - 18, 10, 12, 0, 0, Math.PI * 2);
-  ctx.stroke();
+
+  // 밧줄 — 꼬임(두 가닥 sine) + 끝 매듭 + 올가미 고리 (실제 밧줄 질감)
+  const ropeShake = Math.sin(t * 3) * 1.2;
+  const ropeStart = { x: catcherX + 6, y: GY - 18 };
+  const ropeEnd = { x: caughtX - 4, y: GY - 20 };
+  drawBraidedRope(ctx, ropeStart.x, ropeStart.y, ropeEnd.x, ropeEnd.y, ropeShake);
+  // 올가미 (플레이어 몸에 감긴 고리) — 두 가닥 꼬임
+  drawRopeLoop(ctx, caughtX, GY - 18, 10, 12);
 
   // 캐릭터 렌더
   drawRunnerHero(ctx, catcherX, GY, catcherSex, "grounded", t, true);
@@ -2236,6 +2310,183 @@ function drawEnding(ctx: CanvasRenderingContext2D, c: DrawCtx, cleared: boolean)
   ctx.fillStyle = "#fff";
   ctx.fillText(`점수 ${c.runner.score}`, VW / 2, 74);
   ctx.textAlign = "left";
+}
+
+// 추격자 말풍선 — 파트너 머리 위에 랜덤 대사 (주기적 표출)
+function drawChaserBubble(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  text: string,
+  alpha: number,
+) {
+  ctx.save();
+  ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+  ctx.font = "bold 9px ui-monospace";
+  const padX = 5;
+  const padY = 3;
+  const tw = Math.ceil(ctx.measureText(text).width);
+  const bw = tw + padX * 2;
+  const bh = 14;
+  const bx = Math.round(x - bw / 2);
+  const by = Math.round(y - bh - 6);
+  // 말풍선 배경 (흰색 + 살짝 분홍 테두리)
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(bx, by, bw, bh);
+  ctx.strokeStyle = "#c94a4a";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(bx + 0.5, by + 0.5, bw - 1, bh - 1);
+  // 꼬리 삼각형 (아래)
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath();
+  ctx.moveTo(x - 3, by + bh);
+  ctx.lineTo(x + 3, by + bh);
+  ctx.lineTo(x, by + bh + 4);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = "#c94a4a";
+  ctx.beginPath();
+  ctx.moveTo(x - 3, by + bh);
+  ctx.lineTo(x, by + bh + 4);
+  ctx.lineTo(x + 3, by + bh);
+  ctx.stroke();
+  // 텍스트
+  ctx.fillStyle = "#8a3d3d";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, x, by + bh / 2 + padY / 2);
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+  ctx.restore();
+}
+
+// 꼬임 밧줄 — 두 가닥 sine 교차 + 경계 + 끝 매듭으로 실제 밧줄 질감
+function drawBraidedRope(
+  ctx: CanvasRenderingContext2D,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  sag: number,
+) {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const len = Math.hypot(dx, dy);
+  if (len < 2) return;
+  const angle = Math.atan2(dy, dx);
+  const steps = Math.max(24, Math.floor(len / 3));
+  const amp = 2.2; // 가닥 간격
+  const twist = 0.55; // 단위 길이당 꼬임 주파수
+
+  ctx.save();
+  ctx.translate(x1, y1);
+  ctx.rotate(angle);
+
+  // 아래로 살짝 처지는 베지어 y 오프셋
+  const sagOf = (t: number) => Math.sin(t * Math.PI) * sag;
+
+  const strand = (phase: number) => {
+    ctx.beginPath();
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const px = t * len;
+      const py = sagOf(t) + Math.sin(t * len * twist + phase) * amp;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+  };
+
+  // 밧줄 외곽 (어두운 그림자)
+  ctx.strokeStyle = "#6e4428";
+  ctx.lineWidth = 4;
+  ctx.lineCap = "round";
+  strand(0);
+  strand(Math.PI);
+
+  // 두 가닥 본색
+  ctx.strokeStyle = "#c9a06a";
+  ctx.lineWidth = 2.2;
+  strand(0);
+  ctx.strokeStyle = "#a87a48";
+  strand(Math.PI);
+
+  // 하이라이트
+  ctx.strokeStyle = "#f0d2a0";
+  ctx.lineWidth = 0.8;
+  strand(Math.PI / 2);
+
+  ctx.restore();
+
+  // 끝 매듭 — 양쪽에 동그란 매듭 표시
+  const knot = (cx: number, cy: number) => {
+    ctx.fillStyle = "#6e4428";
+    ctx.beginPath();
+    ctx.arc(cx, cy, 2.4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#c9a06a";
+    ctx.beginPath();
+    ctx.arc(cx, cy, 1.4, 0, Math.PI * 2);
+    ctx.fill();
+  };
+  knot(x1, y1);
+  knot(x2, y2);
+}
+
+// 올가미 고리 — 꼬임 패턴 타원 + 매듭
+function drawRopeLoop(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  rx: number,
+  ry: number,
+) {
+  const steps = 40;
+  ctx.save();
+
+  // 외곽 그림자
+  ctx.strokeStyle = "#6e4428";
+  ctx.lineWidth = 4;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  for (let i = 0; i <= steps; i++) {
+    const a = (i / steps) * Math.PI * 2;
+    const x = cx + Math.cos(a) * rx;
+    const y = cy + Math.sin(a) * ry;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+
+  // 2가닥 꼬임 (phase 교차)
+  const strand = (phase: number, color: string, w: number) => {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = w;
+    ctx.beginPath();
+    for (let i = 0; i <= steps; i++) {
+      const a = (i / steps) * Math.PI * 2;
+      const r = 1.2 * Math.sin(a * 8 + phase);
+      const x = cx + Math.cos(a) * (rx + r * 0.3);
+      const y = cy + Math.sin(a) * (ry + r * 0.3);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  };
+  strand(0, "#c9a06a", 2);
+  strand(Math.PI, "#a87a48", 2);
+
+  // 매듭 포인트 (아래 중앙)
+  ctx.fillStyle = "#6e4428";
+  ctx.beginPath();
+  ctx.arc(cx, cy + ry, 2.6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#c9a06a";
+  ctx.beginPath();
+  ctx.arc(cx, cy + ry, 1.4, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
 }
 
 // 하트 유틸 (기존 유지)
@@ -2293,15 +2544,17 @@ function Share() {
 function Landing({ onPickInvitation, onPickGame }: { onPickInvitation: () => void; onPickGame: () => void }) {
   return (
     <section className="relative flex min-h-[100svh] flex-col items-center justify-center overflow-hidden bg-gradient-to-b from-[color:var(--color-blush)] via-white to-white px-6 text-center">
-      <div className="fade-in flex w-full max-w-sm flex-col items-center">
+      <div className="fade-in flex w-full max-w-[22rem] flex-col items-center">
         <p className="eyebrow mb-4">Wedding Day</p>
-        <h1 className="text-[clamp(1.7rem,7.6vw,2.2rem)] leading-tight text-[color:var(--color-charcoal)] whitespace-nowrap">
-          {data.groom.nameEn} &amp; {data.bride.nameEn}
+        <h1 className="text-[clamp(1.3rem,6vw,1.9rem)] leading-[1.2] text-[color:var(--color-charcoal)] text-center">
+          <span className="block break-words">{data.groom.nameEn}</span>
+          <span className="my-1 block italic text-[0.75em] text-[color:var(--color-rose-deep)]">&amp;</span>
+          <span className="block break-words">{data.bride.nameEn}</span>
         </h1>
-        <p className="mt-3 text-[clamp(13px,3.8vw,15px)] tracking-[0.2em] text-[color:var(--color-mute)] whitespace-nowrap">
+        <p className="mt-3 text-[clamp(12px,3.6vw,14px)] tracking-[0.2em] text-[color:var(--color-mute)]">
           2026. 11. 15 · SUN · 14:00
         </p>
-        <p className="mt-1 text-[clamp(11px,3.2vw,13px)] tracking-[0.16em] text-[color:var(--color-mute)] whitespace-nowrap">
+        <p className="mt-1 text-[clamp(11px,3.2vw,13px)] tracking-[0.16em] text-[color:var(--color-mute)]">
           {data.venue.name}
         </p>
 
