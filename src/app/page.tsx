@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 // 더미 데이터 — 마스터 정보 받으면 교체
 const data = {
@@ -518,6 +518,404 @@ function Guestbook() {
   );
 }
 
+type GameState = "idle" | "playing" | "cleared" | "over";
+
+type Entity = {
+  lane: 0 | 1 | 2;
+  y: number;
+  kind: "ring" | "heart" | "champagne" | "envelope" | "cake";
+  vy: number;
+};
+
+const ITEM_COLOR: Record<Entity["kind"], string> = {
+  ring: "#e89378",
+  heart: "#f0a3a3",
+  champagne: "#d4b876",
+  envelope: "#b29c91",
+  cake: "#8a5a4f",
+};
+
+function MiniGame() {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const stateRef = useRef<GameState>("idle");
+  const [state, setState] = useState<GameState>("idle");
+  const [score, setScore] = useState(0);
+  const [best, setBest] = useState(0);
+  const [remain, setRemain] = useState(60);
+
+  const W = 320;
+  const H = 420;
+  const LANE_W = W / 3;
+  const PLAYER_Y = H - 70;
+
+  const laneRef = useRef<0 | 1 | 2>(1);
+  const entitiesRef = useRef<Entity[]>([]);
+  const spawnTimerRef = useRef(0);
+  const scoreRef = useRef(0);
+  const invincibleRef = useRef(0);
+  const lastTsRef = useRef<number | null>(null);
+  const timeLeftRef = useRef(60);
+  const rafRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("wedding_mini_best");
+      if (raw) setBest(parseInt(raw, 10) || 0);
+    } catch {}
+  }, []);
+
+  const syncState = useCallback((s: GameState) => {
+    stateRef.current = s;
+    setState(s);
+  }, []);
+
+  const reset = useCallback(() => {
+    laneRef.current = 1;
+    entitiesRef.current = [];
+    spawnTimerRef.current = 0;
+    scoreRef.current = 0;
+    invincibleRef.current = 0;
+    timeLeftRef.current = 60;
+    lastTsRef.current = null;
+    setScore(0);
+    setRemain(60);
+  }, []);
+
+  const endGame = useCallback(
+    (final: GameState) => {
+      syncState(final);
+      try {
+        if (scoreRef.current > best) {
+          setBest(scoreRef.current);
+          localStorage.setItem("wedding_mini_best", String(scoreRef.current));
+        }
+      } catch {}
+    },
+    [best, syncState],
+  );
+
+  const start = useCallback(() => {
+    reset();
+    syncState("playing");
+  }, [reset, syncState]);
+
+  const moveLane = useCallback((dir: -1 | 1) => {
+    if (stateRef.current !== "playing") return;
+    const next = laneRef.current + dir;
+    if (next < 0 || next > 2) return;
+    laneRef.current = next as 0 | 1 | 2;
+  }, []);
+
+  // 키보드 컨트롤
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "ArrowLeft") moveLane(-1);
+      else if (e.key === "ArrowRight") moveLane(1);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [moveLane]);
+
+  // 게임 루프
+  useEffect(() => {
+    if (state !== "playing") return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const loop = (ts: number) => {
+      if (stateRef.current !== "playing") return;
+      const last = lastTsRef.current ?? ts;
+      const dt = Math.min(0.05, (ts - last) / 1000);
+      lastTsRef.current = ts;
+
+      // 타이머
+      timeLeftRef.current -= dt;
+      if (timeLeftRef.current <= 0) {
+        scoreRef.current += 500; // 생존 보너스
+        setScore(scoreRef.current);
+        setRemain(0);
+        endGame("cleared");
+        return;
+      }
+      setRemain(Math.max(0, Math.ceil(timeLeftRef.current)));
+
+      // 무적 감소
+      if (invincibleRef.current > 0) invincibleRef.current -= dt;
+
+      // 스폰
+      spawnTimerRef.current -= dt;
+      if (spawnTimerRef.current <= 0) {
+        spawnTimerRef.current = 0.55 + Math.random() * 0.35;
+        const r = Math.random();
+        const kind: Entity["kind"] =
+          r < 0.25 ? "ring" : r < 0.5 ? "heart" : r < 0.62 ? "champagne" : r < 0.85 ? "envelope" : "cake";
+        entitiesRef.current.push({
+          lane: Math.floor(Math.random() * 3) as 0 | 1 | 2,
+          y: -30,
+          kind,
+          vy: 170 + Math.random() * 60,
+        });
+      }
+
+      // 엔티티 업데이트 + 충돌
+      const survivors: Entity[] = [];
+      for (const e of entitiesRef.current) {
+        e.y += e.vy * dt;
+        const hit =
+          e.lane === laneRef.current &&
+          e.y > PLAYER_Y - 26 &&
+          e.y < PLAYER_Y + 26;
+        if (hit) {
+          if (e.kind === "ring") scoreRef.current += 100;
+          else if (e.kind === "heart") scoreRef.current += 50;
+          else if (e.kind === "champagne") {
+            scoreRef.current += 150;
+            invincibleRef.current = 3;
+          } else if (e.kind === "envelope") {
+            if (invincibleRef.current <= 0) {
+              scoreRef.current = Math.max(0, scoreRef.current - 100);
+            }
+          } else if (e.kind === "cake") {
+            if (invincibleRef.current <= 0) {
+              setScore(scoreRef.current);
+              endGame("over");
+              return;
+            }
+          }
+          setScore(scoreRef.current);
+          continue;
+        }
+        if (e.y < H + 30) survivors.push(e);
+      }
+      entitiesRef.current = survivors;
+
+      // 렌더
+      ctx.fillStyle = "#fdfbf7";
+      ctx.fillRect(0, 0, W, H);
+
+      // 레인 가이드
+      ctx.strokeStyle = "rgba(232, 147, 120, 0.18)";
+      ctx.lineWidth = 1;
+      for (let i = 1; i < 3; i++) {
+        ctx.beginPath();
+        ctx.moveTo(LANE_W * i, 0);
+        ctx.lineTo(LANE_W * i, H);
+        ctx.stroke();
+      }
+
+      // 엔티티
+      for (const e of entitiesRef.current) {
+        const cx = e.lane * LANE_W + LANE_W / 2;
+        ctx.fillStyle = ITEM_COLOR[e.kind];
+        if (e.kind === "ring") {
+          ctx.beginPath();
+          ctx.arc(cx, e.y, 12, 0, Math.PI * 2);
+          ctx.lineWidth = 4;
+          ctx.strokeStyle = ITEM_COLOR.ring;
+          ctx.stroke();
+        } else if (e.kind === "heart") {
+          drawHeart(ctx, cx, e.y, 11, ITEM_COLOR.heart);
+        } else if (e.kind === "champagne") {
+          ctx.fillRect(cx - 6, e.y - 12, 12, 22);
+          ctx.beginPath();
+          ctx.arc(cx, e.y - 14, 4, 0, Math.PI * 2);
+          ctx.fill();
+        } else if (e.kind === "envelope") {
+          ctx.fillRect(cx - 14, e.y - 9, 28, 18);
+          ctx.strokeStyle = "#fff";
+          ctx.lineWidth = 1.2;
+          ctx.beginPath();
+          ctx.moveTo(cx - 14, e.y - 9);
+          ctx.lineTo(cx, e.y + 3);
+          ctx.lineTo(cx + 14, e.y - 9);
+          ctx.stroke();
+        } else if (e.kind === "cake") {
+          ctx.fillRect(cx - 14, e.y - 6, 28, 14);
+          ctx.fillStyle = "#f0a3a3";
+          ctx.fillRect(cx - 14, e.y - 10, 28, 5);
+        }
+      }
+
+      // 플레이어 (블러시+로즈 하트)
+      const px = laneRef.current * LANE_W + LANE_W / 2;
+      const blink = invincibleRef.current > 0 && Math.floor(ts / 80) % 2 === 0;
+      drawHeart(ctx, px, PLAYER_Y, 15, blink ? "#f5b8a8" : "#e89378");
+
+      rafRef.current = requestAnimationFrame(loop);
+    };
+
+    rafRef.current = requestAnimationFrame(loop);
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+  }, [state, endGame]);
+
+  // 터치 핸들러 — 좌우 스와이프 + 좌우 탭
+  const touchStartX = useRef<number | null>(null);
+  const onTouchStart = (e: React.TouchEvent) => {
+    if (stateRef.current !== "playing") return;
+    touchStartX.current = e.touches[0].clientX;
+  };
+  const onTouchEnd = (e: React.TouchEvent) => {
+    if (stateRef.current !== "playing") return;
+    if (touchStartX.current == null) return;
+    const dx = e.changedTouches[0].clientX - touchStartX.current;
+    if (Math.abs(dx) > 18) {
+      moveLane(dx > 0 ? 1 : -1);
+    } else {
+      // 탭 위치로 이동
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      const x = e.changedTouches[0].clientX - rect.left;
+      if (x < rect.width / 3) moveLane(-1);
+      else if (x > (rect.width * 2) / 3) moveLane(1);
+    }
+    touchStartX.current = null;
+  };
+
+  return (
+    <section className="px-5 py-10 bg-white">
+      <Card>
+        <SectionHead kicker="Mini Game" title="웨딩 러너" />
+        <p className="mb-5 text-center text-[13px] text-[color:var(--color-mute)] leading-loose">
+          60초 안에 반지 · 하트 · 샴페인을 모으고
+          <br />
+          봉투와 케이크를 피해주세요.
+        </p>
+
+        <div className="mx-auto max-w-[320px]">
+          <div className="mb-3 flex items-center justify-between text-[12px] tracking-widest text-[color:var(--color-mute)]">
+            <span>
+              SCORE <b className="ml-1 text-[color:var(--color-rose-deep)] text-base">{score}</b>
+            </span>
+            <span>
+              TIME <b className="ml-1 text-[color:var(--color-rose-deep)] text-base">{remain}</b>
+            </span>
+            <span>
+              BEST <b className="ml-1 text-[color:var(--color-charcoal)] text-base">{best}</b>
+            </span>
+          </div>
+
+          <div
+            className="relative overflow-hidden rounded-2xl border border-[color:var(--color-rose)]/25 bg-[#fdfbf7]"
+            style={{ touchAction: "none" }}
+            onTouchStart={onTouchStart}
+            onTouchEnd={onTouchEnd}
+          >
+            <canvas ref={canvasRef} width={W} height={H} className="block w-full h-auto select-none" />
+
+            {state === "idle" && (
+              <GameOverlay
+                title="Wedding Runner"
+                description="좌우 스와이프 · 화살표 · 좌우 탭"
+                btn="시작하기"
+                onClick={start}
+              />
+            )}
+            {state === "cleared" && (
+              <GameOverlay
+                title="결혼했다! 🎉"
+                description={`60초 생존 성공 · 보너스 +500\n최종 점수 ${score}`}
+                btn="다시 하기"
+                onClick={start}
+              />
+            )}
+            {state === "over" && (
+              <GameOverlay
+                title="게임 오버"
+                description={`케이크에 부딪혔습니다.\n최종 점수 ${score}`}
+                btn="다시 하기"
+                onClick={start}
+              />
+            )}
+          </div>
+
+          <div className="mt-3 grid grid-cols-2 gap-2 sm:hidden">
+            <button
+              onTouchStart={(e) => {
+                e.preventDefault();
+                moveLane(-1);
+              }}
+              className="py-3 rounded-xl border border-[color:var(--color-rose)]/30 text-[color:var(--color-rose-deep)]"
+            >
+              ← LEFT
+            </button>
+            <button
+              onTouchStart={(e) => {
+                e.preventDefault();
+                moveLane(1);
+              }}
+              className="py-3 rounded-xl border border-[color:var(--color-rose)]/30 text-[color:var(--color-rose-deep)]"
+            >
+              RIGHT →
+            </button>
+          </div>
+
+          <div className="mt-5 grid grid-cols-5 gap-1 text-[11px] tracking-wide text-[color:var(--color-mute)] text-center">
+            <LegendDot color={ITEM_COLOR.ring} label="반지 +100" />
+            <LegendDot color={ITEM_COLOR.heart} label="하트 +50" />
+            <LegendDot color={ITEM_COLOR.champagne} label="샴페인 +150" />
+            <LegendDot color={ITEM_COLOR.envelope} label="봉투 −100" />
+            <LegendDot color={ITEM_COLOR.cake} label="케이크 OUT" />
+          </div>
+        </div>
+      </Card>
+    </section>
+  );
+}
+
+function GameOverlay({
+  title,
+  description,
+  btn,
+  onClick,
+}: {
+  title: string;
+  description: string;
+  btn: string;
+  onClick: () => void;
+}) {
+  return (
+    <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-[color:var(--color-blush)]/85 backdrop-blur-sm text-center px-6">
+      <p className="text-lg text-[color:var(--color-charcoal)]">{title}</p>
+      <p className="text-[13px] leading-relaxed text-[color:var(--color-charcoal)]/75 whitespace-pre-line">
+        {description}
+      </p>
+      <button
+        onClick={onClick}
+        className="rounded-full bg-[color:var(--color-rose-deep)] px-6 py-2.5 text-[12px] tracking-[0.3em] text-white"
+      >
+        {btn}
+      </button>
+    </div>
+  );
+}
+
+function LegendDot({ color, label }: { color: string; label: string }) {
+  return (
+    <div className="flex flex-col items-center gap-1">
+      <span className="inline-block h-3 w-3 rounded-full" style={{ background: color }} />
+      <span>{label}</span>
+    </div>
+  );
+}
+
+function drawHeart(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  s: number,
+  color: string,
+) {
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy + s * 0.6);
+  ctx.bezierCurveTo(cx + s * 1.2, cy + s * 0.2, cx + s * 0.9, cy - s * 0.9, cx, cy - s * 0.2);
+  ctx.bezierCurveTo(cx - s * 0.9, cy - s * 0.9, cx - s * 1.2, cy + s * 0.2, cx, cy + s * 0.6);
+  ctx.fill();
+}
+
 function Share() {
   const share = async () => {
     if (typeof navigator !== "undefined" && navigator.share) {
@@ -566,6 +964,7 @@ export default function Home() {
       <Calendar />
       <Gallery />
       <Location />
+      <MiniGame />
       <Account />
       <Guestbook />
       <Share />
