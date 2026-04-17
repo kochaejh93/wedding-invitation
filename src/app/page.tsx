@@ -573,13 +573,21 @@ const VW = 320;
 const VH = 288;
 const TILE = 16;
 
-// Phase 4 러너 상수
-const LANES = 3;
-const LANE_X = [VW * 0.28, VW * 0.5, VW * 0.72];
+// Phase 4 러너 상수 — 횡스크롤 엔드리스 러너 (t-rex-runner 패턴 참고, 오리지널 드로잉)
 const RUN_DURATION = 60; // 초
+const GROUND_Y = VH - 44; // 플레이어 발바닥 y
+const PLAYER_X = Math.floor(VW * 0.3); // 플레이어 고정 x
+const GRAVITY = 1600; // px/s^2
+const JUMP_VY = -520; // px/s (위로)
+const SLIDE_DURATION = 0.6; // 초
+const BASE_SPEED = 140; // px/s
+const MAX_SPEED = 340; // px/s
+const SPEED_ACCEL = 6; // 초당 속도 증가
+const PARTNER_GAP_MAX = 78; // 파트너-플레이어 최대 간격
+const PARTNER_GAP_START = 56; // 시작 간격
 
-type RunnerItem =
-  | { kind: "ring" | "heart" | "bouquet" | "champagne" | "envelope" | "cake" | "kid"; lane: number; y: number };
+type RunnerKind = "coin" | "gem" | "bouquet" | "stone" | "bird" | "banner";
+type RunnerItem = { kind: RunnerKind; x: number; y: number; hit?: boolean };
 
 // 대사 큐 — 플랫 카툰 RPG 스타일, 오리지널 카피
 const INTRO_LINES: string[] = [
@@ -852,13 +860,21 @@ function WeddingAdventure() {
   const [lives, setLives] = useState(3);
   const livesRef = useRef(3);
   const [best, setBest] = useState(0);
-  const laneRef = useRef(1);
+  // 플레이어 물리 상태
+  const playerYRef = useRef(GROUND_Y);
+  const playerVYRef = useRef(0);
+  const playerStateRef = useRef<"grounded" | "jumping" | "sliding">("grounded");
+  const slideTimerRef = useRef(0);
+  // 월드 상태
+  const worldSpeedRef = useRef(BASE_SPEED);
+  const elapsedRef = useRef(0);
   const itemsRef = useRef<RunnerItem[]>([]);
-  const spawnRef = useRef(0.8);
+  const spawnRef = useRef(0.9);
   const invincRef = useRef(0);
   const runScrollRef = useRef(0);
-  // 트레일링 파트너(반대 캐릭터) 레인 히스토리 — 약 1초 지연
-  const laneTrailRef = useRef<number[]>(Array(24).fill(1));
+  // 추격자(파트너) — 플레이어보다 더 뒤에서 따라옴. 피격 시 간격 줄어들어 잡힘
+  const partnerGapRef = useRef(PARTNER_GAP_START);
+  const partnerBounceRef = useRef(0);
 
   // RAF 루프
   const rafRef = useRef<number | null>(null);
@@ -892,12 +908,18 @@ function WeddingAdventure() {
     scoreRef.current = 0;
     remainRef.current = RUN_DURATION;
     livesRef.current = 3;
-    laneRef.current = 1;
+    playerYRef.current = GROUND_Y;
+    playerVYRef.current = 0;
+    playerStateRef.current = "grounded";
+    slideTimerRef.current = 0;
+    worldSpeedRef.current = BASE_SPEED;
+    elapsedRef.current = 0;
     itemsRef.current = [];
-    spawnRef.current = 0.8;
+    spawnRef.current = 0.9;
     invincRef.current = 0;
     runScrollRef.current = 0;
-    laneTrailRef.current = Array(24).fill(1);
+    partnerGapRef.current = PARTNER_GAP_START;
+    partnerBounceRef.current = 0;
     setScore(0);
     setRemain(RUN_DURATION);
     setLives(3);
@@ -939,11 +961,26 @@ function WeddingAdventure() {
     setDialogChars(0);
   }, []);
 
-  // 러너 레인 이동
-  const moveLane = useCallback((delta: -1 | 1) => {
+  // 러너 액션 — 점프 / 슬라이드
+  const jump = useCallback(() => {
     if (phaseRef.current !== "runner") return;
-    laneRef.current = Math.max(0, Math.min(LANES - 1, laneRef.current + delta));
-  }, []);
+    if (playerStateRef.current !== "grounded") return;
+    playerStateRef.current = "jumping";
+    playerVYRef.current = JUMP_VY;
+    audio.sfx("jump");
+  }, [audio]);
+  const slide = useCallback(() => {
+    if (phaseRef.current !== "runner") return;
+    if (playerStateRef.current === "sliding") return;
+    // 공중에서 아래 키 누르면 빠르게 착지 후 슬라이드
+    if (playerStateRef.current === "jumping") {
+      playerVYRef.current = Math.max(playerVYRef.current, 700);
+      return;
+    }
+    playerStateRef.current = "sliding";
+    slideTimerRef.current = SLIDE_DURATION;
+    audio.sfx("dialog");
+  }, [audio]);
 
   // 집 탈출 이동
   const movePlayer = useCallback((dx: number, dy: number) => {
@@ -995,14 +1032,19 @@ function WeddingAdventure() {
         return;
       }
       if (phaseRef.current === "runner") {
-        if (e.key === "ArrowLeft") moveLane(-1);
-        else if (e.key === "ArrowRight") moveLane(1);
+        if (e.key === "ArrowUp" || e.key === " " || e.key === "Spacebar" || e.key === "w" || e.key === "W") {
+          e.preventDefault();
+          jump();
+        } else if (e.key === "ArrowDown" || e.key === "s" || e.key === "S") {
+          e.preventDefault();
+          slide();
+        }
         return;
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [advanceDialog, movePlayer, moveLane, setPhaseBoth, startRunner]);
+  }, [advanceDialog, movePlayer, jump, slide, setPhaseBoth, startRunner]);
 
   // 터치 스와이프 (러너 전용)
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -1017,7 +1059,15 @@ function WeddingAdventure() {
     if (!s) return;
     const t = e.changedTouches[0];
     const dx = t.clientX - s.x;
-    if (Math.abs(dx) > 24) moveLane(dx < 0 ? -1 : 1);
+    const dy = t.clientY - s.y;
+    // 세로 스와이프 우선
+    if (Math.abs(dy) > 18 && Math.abs(dy) > Math.abs(dx)) {
+      if (dy < 0) jump();
+      else slide();
+    } else if (Math.abs(dx) < 14 && Math.abs(dy) < 14) {
+      // 짧은 탭 = 점프
+      jump();
+    }
     touchStartRef.current = null;
   };
 
@@ -1061,58 +1111,111 @@ function WeddingAdventure() {
         }
       } else if (ph === "runner") {
         remainRef.current -= dt;
-        runScrollRef.current = (runScrollRef.current + dt * 120) % 32;
+        elapsedRef.current += dt;
+        // 시간이 흐를수록 월드 속도 증가 — 난이도 점증
+        worldSpeedRef.current = Math.min(MAX_SPEED, BASE_SPEED + elapsedRef.current * SPEED_ACCEL);
+        runScrollRef.current = (runScrollRef.current + dt * worldSpeedRef.current) % 64;
         if (invincRef.current > 0) invincRef.current -= dt;
         setRemain(Math.max(0, Math.ceil(remainRef.current)));
-        // 트레일 레인 히스토리 푸시 (매 프레임마다, ~1초 지연 큐)
-        laneTrailRef.current.push(laneRef.current);
-        if (laneTrailRef.current.length > 24) laneTrailRef.current.shift();
+
+        // 플레이어 물리
+        if (playerStateRef.current === "jumping") {
+          playerVYRef.current += GRAVITY * dt;
+          playerYRef.current += playerVYRef.current * dt;
+          if (playerYRef.current >= GROUND_Y) {
+            playerYRef.current = GROUND_Y;
+            playerVYRef.current = 0;
+            playerStateRef.current = "grounded";
+          }
+        } else if (playerStateRef.current === "sliding") {
+          slideTimerRef.current -= dt;
+          if (slideTimerRef.current <= 0) {
+            playerStateRef.current = "grounded";
+            slideTimerRef.current = 0;
+          }
+        }
+
+        // 파트너는 피격 안 당하면 서서히 뒤로 밀려남(안전 거리 회복)
+        partnerGapRef.current = Math.min(PARTNER_GAP_MAX, partnerGapRef.current + dt * 6);
+        partnerBounceRef.current += dt * 10;
 
         // 스폰
         spawnRef.current -= dt;
         if (spawnRef.current <= 0) {
-          spawnRef.current = 0.55 + Math.random() * 0.4;
-          const lane = Math.floor(Math.random() * LANES);
+          // 속도가 빨라질수록 스폰 간격도 약간 좁아짐
+          const base = Math.max(0.45, 1.0 - elapsedRef.current * 0.008);
+          spawnRef.current = base + Math.random() * 0.35;
           const r = Math.random();
-          const kind: RunnerItem["kind"] =
-            r < 0.25 ? "ring"
-            : r < 0.45 ? "heart"
-            : r < 0.52 ? "bouquet"
-            : r < 0.62 ? "champagne"
-            : r < 0.78 ? "envelope"
-            : r < 0.92 ? "cake"
-            : "kid";
-          itemsRef.current.push({ kind, lane, y: -20 });
+          let kind: RunnerKind;
+          if (r < 0.18) kind = "coin";
+          else if (r < 0.30) kind = "gem";
+          else if (r < 0.38) kind = "bouquet";
+          else if (r < 0.66) kind = "stone";
+          else if (r < 0.86) kind = "bird";
+          else kind = "banner";
+          const y =
+            kind === "bird" ? GROUND_Y - 40
+            : kind === "banner" ? GROUND_Y - 32
+            : kind === "coin" || kind === "gem" ? GROUND_Y - 22 - Math.random() * 24
+            : GROUND_Y - 2; // stone, bouquet (지면)
+          itemsRef.current.push({ kind, x: VW + 20, y });
         }
 
-        // 이동 + 충돌
-        const playerY = VH - 60;
-        const playerLane = laneRef.current;
+        // 월드 이동
+        const mv = worldSpeedRef.current * dt;
+        for (const it of itemsRef.current) it.x -= mv;
+
+        // 충돌 판정
+        const px = PLAYER_X;
+        const py = playerYRef.current;
+        const ps = playerStateRef.current;
+        // 플레이어 hitbox — 슬라이딩 중엔 납작
+        const pbox = ps === "sliding"
+          ? { x: px - 7, y: py - 8, w: 14, h: 8 }
+          : { x: px - 6, y: py - 22, w: 12, h: 22 };
         for (const it of itemsRef.current) {
-          it.y += dt * 180;
-          if (Math.abs(it.y - playerY) < 20 && it.lane === playerLane) {
-            // 충돌
-            if (it.kind === "ring") { scoreRef.current += 100; it.y = VH + 99; audio.sfx("pickup"); }
-            else if (it.kind === "heart") { scoreRef.current += 50; it.y = VH + 99; audio.sfx("pickup"); }
-            else if (it.kind === "bouquet") { scoreRef.current += 300; it.y = VH + 99; audio.sfx("pickup"); }
-            else if (it.kind === "champagne") { scoreRef.current += 150; invincRef.current = 3; it.y = VH + 99; audio.sfx("pickup"); }
-            else if (it.kind === "envelope") {
-              if (invincRef.current <= 0) { scoreRef.current = Math.max(0, scoreRef.current - 100); audio.sfx("hit"); }
-              it.y = VH + 99;
-            } else if (it.kind === "kid") {
-              if (invincRef.current <= 0) { livesRef.current -= 1; scoreRef.current = Math.max(0, scoreRef.current - 200); audio.sfx("hit"); }
-              it.y = VH + 99;
-            } else if (it.kind === "cake") {
-              if (invincRef.current <= 0) { livesRef.current = 0; audio.sfx("hit"); }
-              else { it.y = VH + 99; }
+          if (it.hit) continue;
+          let ibox: { x: number; y: number; w: number; h: number };
+          if (it.kind === "stone") ibox = { x: it.x - 6, y: it.y - 10, w: 12, h: 10 };
+          else if (it.kind === "bird") ibox = { x: it.x - 7, y: it.y - 5, w: 14, h: 8 };
+          else if (it.kind === "banner") ibox = { x: it.x - 9, y: it.y - 10, w: 18, h: 14 };
+          else if (it.kind === "bouquet") ibox = { x: it.x - 6, y: it.y - 12, w: 12, h: 12 };
+          else ibox = { x: it.x - 6, y: it.y - 6, w: 12, h: 12 };
+          const hit =
+            pbox.x < ibox.x + ibox.w &&
+            pbox.x + pbox.w > ibox.x &&
+            pbox.y < ibox.y + ibox.h &&
+            pbox.y + pbox.h > ibox.y;
+          if (!hit) continue;
+          it.hit = true;
+          if (it.kind === "coin") { scoreRef.current += 50; audio.sfx("pickup"); }
+          else if (it.kind === "gem") { scoreRef.current += 150; audio.sfx("pickup"); }
+          else if (it.kind === "bouquet") { scoreRef.current += 300; invincRef.current = 2.5; audio.sfx("pickup"); }
+          else {
+            // 장애물 피격 — 라이프 감소 + 파트너가 가까워짐
+            if (invincRef.current <= 0) {
+              livesRef.current -= 1;
+              partnerGapRef.current = Math.max(8, partnerGapRef.current - 22);
+              audio.sfx("hit");
             }
-            setScore(scoreRef.current);
-            setLives(livesRef.current);
           }
+          setScore(scoreRef.current);
+          setLives(livesRef.current);
         }
-        itemsRef.current = itemsRef.current.filter((e) => e.y < VH + 40);
 
-        if (livesRef.current <= 0) { endRunner(false); }
+        // 장애물 통과 점수 + 화면 밖/피격 제거
+        itemsRef.current = itemsRef.current.filter((it) => {
+          if (it.hit) return false;
+          if (it.x < -30) {
+            if (it.kind === "stone" || it.kind === "bird" || it.kind === "banner") {
+              scoreRef.current += 10;
+            }
+            return false;
+          }
+          return true;
+        });
+
+        if (livesRef.current <= 0 || partnerGapRef.current <= 0) { endRunner(false); }
         else if (remainRef.current <= 0) { endRunner(true); }
       }
 
@@ -1126,8 +1229,11 @@ function WeddingAdventure() {
         dialogChars: dialogCharsRef.current,
         cursorBlink: cursorBlinkRef.current,
         runner: {
-          lane: laneRef.current,
-          trailLane: laneTrailRef.current[0] ?? laneRef.current,
+          playerY: playerYRef.current,
+          playerState: playerStateRef.current,
+          partnerGap: partnerGapRef.current,
+          partnerBounce: partnerBounceRef.current,
+          worldSpeed: worldSpeedRef.current,
           items: itemsRef.current,
           invinc: invincRef.current,
           remain: remainRef.current,
@@ -1157,12 +1263,13 @@ function WeddingAdventure() {
     } else if (p === "town") {
       advanceDialog(TOWN_LINES, () => startRunner());
     } else if (p === "runner") {
+      // 화면 하단 1/3 탭 = 슬라이드, 나머지 = 점프
       const rect = e.currentTarget.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      if (x < rect.width / 2) moveLane(-1);
-      else moveLane(1);
+      const y = e.clientY - rect.top;
+      if (y > rect.height * 0.66) slide();
+      else jump();
     }
-  }, [advanceDialog, moveLane, setPhaseBoth, startRunner]);
+  }, [advanceDialog, jump, slide, setPhaseBoth, startRunner]);
 
   return (
     <section className="px-5 pt-6 pb-14">
@@ -1264,17 +1371,19 @@ function WeddingAdventure() {
               <div className="mt-2 grid grid-cols-2 gap-2">
                 <button
                   type="button"
-                  onClick={() => moveLane(-1)}
-                  className="py-3 rounded-md bg-white/70 border border-[color:var(--color-rose)]/30 text-[13px] tracking-widest"
+                  onClick={() => slide()}
+                  onTouchStart={(e) => { e.preventDefault(); slide(); }}
+                  className="py-3 rounded-md bg-white/80 border border-[color:var(--color-rose)]/30 text-[13px] tracking-widest"
                 >
-                  ◀ LEFT
+                  ⬇ 앉기 (SLIDE)
                 </button>
                 <button
                   type="button"
-                  onClick={() => moveLane(1)}
-                  className="py-3 rounded-md bg-white/70 border border-[color:var(--color-rose)]/30 text-[13px] tracking-widest"
+                  onClick={() => jump()}
+                  onTouchStart={(e) => { e.preventDefault(); jump(); }}
+                  className="py-3 rounded-md bg-[color:var(--color-rose-deep)] text-white text-[13px] tracking-widest"
                 >
-                  RIGHT ▶
+                  점프 (JUMP) ⬆
                 </button>
               </div>
             )}
@@ -1298,7 +1407,7 @@ function WeddingAdventure() {
             )}
 
             <p className="mt-3 text-center text-[10px] tracking-widest opacity-55">
-              탭/클릭 = 대화 진행 · ← → 또는 스와이프 = 이동
+              탭/클릭 = 대화 · 점프↑ / 슬라이드↓ · 위·아래 스와이프
             </p>
           </div>
         </div>
@@ -1320,8 +1429,11 @@ type DrawCtx = {
   dialogChars: number;
   cursorBlink: number;
   runner: {
-    lane: number;
-    trailLane: number;
+    playerY: number;
+    playerState: "grounded" | "jumping" | "sliding";
+    partnerGap: number;
+    partnerBounce: number;
+    worldSpeed: number;
     items: RunnerItem[];
     invinc: number;
     remain: number;
@@ -1709,68 +1821,244 @@ function drawNPC(ctx: CanvasRenderingContext2D, x: number, y: number, color: str
   ctx.fillRect(x + 1, y + 8, 2, 3);
 }
 
-// ───── Phase 4 러너 ─────
+// ───── Phase 4 러너 — 횡스크롤 엔드리스 ─────
 function drawRunner(ctx: CanvasRenderingContext2D, c: DrawCtx) {
-  // 레드카펫 배경
-  ctx.fillStyle = "#e8d7b4";
-  ctx.fillRect(0, 0, VW, VH);
-  // 카펫 영역
-  const cx = VW * 0.18;
-  const cw = VW * 0.64;
-  ctx.fillStyle = "#c94a4a";
-  ctx.fillRect(cx, 0, cw, VH);
-  // 카펫 금색 트림
+  const t = performance.now() / 1000;
+  const scroll = c.runner.scroll;
+  const speed = c.runner.worldSpeed;
+
+  // 하늘 그라디언트
+  const sky = ctx.createLinearGradient(0, 0, 0, GROUND_Y);
+  sky.addColorStop(0, "#fad9c8");
+  sky.addColorStop(0.55, "#f7c4be");
+  sky.addColorStop(1, "#f4b4a8");
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, VW, GROUND_Y);
+
+  // 먼 구름 (느린 패럴랙스)
+  const cloudOff = (t * speed * 0.05) % 120;
+  ctx.fillStyle = "rgba(255,255,255,0.8)";
+  for (let i = 0; i < 5; i++) {
+    const cx = ((i * 90 - cloudOff) % (VW + 60)) - 30;
+    const cy = 22 + (i % 2) * 16;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 8, 0, Math.PI * 2);
+    ctx.arc(cx + 8, cy - 3, 7, 0, Math.PI * 2);
+    ctx.arc(cx + 16, cy, 7, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // 먼 언덕 (중간 패럴랙스)
+  const hillOff = (t * speed * 0.15) % 160;
+  ctx.fillStyle = "#d18a8f";
+  for (let i = -1; i < 4; i++) {
+    const hx = i * 120 - hillOff;
+    ctx.beginPath();
+    ctx.moveTo(hx, GROUND_Y);
+    ctx.quadraticCurveTo(hx + 60, GROUND_Y - 50, hx + 120, GROUND_Y);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // 가까운 장식 나무 (빠른 패럴랙스)
+  const treeOff = (t * speed * 0.6) % 80;
+  for (let i = -1; i < 6; i++) {
+    const tx = i * 72 - treeOff + 30;
+    drawPineTree(ctx, tx, GROUND_Y - 2);
+  }
+
+  // 지면 (레드카펫 감성)
+  ctx.fillStyle = "#8a3d3d";
+  ctx.fillRect(0, GROUND_Y, VW, VH - GROUND_Y);
+  ctx.fillStyle = "#6e2f2f";
+  ctx.fillRect(0, GROUND_Y, VW, 3);
+  // 지면 스크롤 띠 (플레이어 달리는 느낌)
   ctx.fillStyle = "#f2d37a";
-  ctx.fillRect(cx - 2, 0, 2, VH);
-  ctx.fillRect(cx + cw, 0, 2, VH);
-  // 카펫 타일 스크롤
-  ctx.fillStyle = "rgba(255,255,255,0.1)";
-  for (let y = -32 + c.runner.scroll; y < VH; y += 32) {
-    ctx.fillRect(cx, y, cw, 2);
+  for (let x = -scroll; x < VW; x += 64) {
+    ctx.fillRect(x, GROUND_Y + 6, 32, 2);
   }
-  // 양 옆 하객 실루엣 (여러 색)
-  const palette = ["#e89378", "#c9a2d4", "#a0c7a2", "#7a9ac9", "#e2b85a"];
-  for (let i = 0; i < 8; i++) {
-    const y = ((i * 36 + c.runner.scroll * 2) % (VH + 40)) - 20;
-    drawGuestSilhouette(ctx, 18, y, palette[i % palette.length]);
-    drawGuestSilhouette(ctx, VW - 18, y, palette[(i + 2) % palette.length]);
+  ctx.fillStyle = "rgba(0,0,0,0.15)";
+  for (let x = -scroll / 2; x < VW; x += 32) {
+    ctx.fillRect(x, GROUND_Y + 14, 16, 1);
   }
-  // 아이템
+
+  // 장애물 + 아이템
   for (const it of c.runner.items) {
-    const x = LANE_X[it.lane];
-    drawRunnerItem(ctx, x, it.y, it.kind);
+    drawRunnerItem(ctx, it.x, it.y, it.kind, t);
   }
-  // 트레일링 파트너 (반대 캐릭터, 약 1초 지연)
+
+  // 파트너(추격자) — 플레이어 뒤쪽
   const partnerSex: Sex = c.sex === "groom" ? "bride" : "groom";
-  const tx = LANE_X[c.runner.trailLane];
-  const ty = VH - 22;
-  drawHero(ctx, tx, ty, "up", partnerSex, performance.now() / 1000);
-  // 파트너 이름 라벨
-  ctx.fillStyle = "rgba(0,0,0,0.55)";
-  ctx.font = "9px ui-monospace";
-  ctx.textAlign = "center";
-  ctx.fillText(partnerSex === "bride" ? "수빈" : "종현", tx, ty + 16);
-  ctx.textAlign = "left";
+  const partnerX = Math.max(8, PLAYER_X - c.runner.partnerGap);
+  const partnerBob = Math.sin(c.runner.partnerBounce) * 1.2;
+  drawRunnerHero(ctx, partnerX, GROUND_Y + partnerBob, partnerSex, "grounded", t, true);
+  // 손에 든 밧줄 (추격 연출)
+  ctx.strokeStyle = "rgba(90,40,40,0.65)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(partnerX + 6, GROUND_Y - 12);
+  const ropeEnd = PLAYER_X - 8;
+  ctx.quadraticCurveTo((partnerX + ropeEnd) / 2, GROUND_Y - 18 + Math.sin(t * 6) * 2, ropeEnd, GROUND_Y - 16);
+  ctx.stroke();
+
   // 플레이어
-  const px = LANE_X[c.runner.lane];
-  const py = VH - 46;
-  if (c.runner.invinc > 0 && Math.floor(c.runner.invinc * 10) % 2 === 0) {
-    // 블링크
-  } else {
-    drawHero(ctx, px, py, "up", c.sex, performance.now() / 1000);
+  const blinking = c.runner.invinc > 0 && Math.floor(c.runner.invinc * 10) % 2 === 0;
+  if (!blinking) {
+    drawRunnerHero(ctx, PLAYER_X, c.runner.playerY, c.sex, c.runner.playerState, t, false);
   }
+
   // 상단 HUD 바
-  ctx.fillStyle = "rgba(0,0,0,0.5)";
+  ctx.fillStyle = "rgba(0,0,0,0.55)";
   ctx.fillRect(0, 0, VW, 16);
   ctx.fillStyle = "#fff";
   ctx.font = "10px ui-monospace";
   ctx.fillText(`⏱${Math.ceil(c.runner.remain)}s`, 6, 11);
-  ctx.fillText(`♥${Math.max(0, c.runner.lives)}`, 60, 11);
-  ctx.fillText(`★${c.runner.score}`, 110, 11);
+  ctx.fillText(`♥${Math.max(0, c.runner.lives)}`, 58, 11);
+  ctx.fillText(`★${c.runner.score}`, 106, 11);
+  ctx.fillText(`v${Math.round(speed)}`, 168, 11);
   if (c.runner.invinc > 0) {
     ctx.fillStyle = "#ffd36a";
-    ctx.fillText("INVINCIBLE", 170, 11);
+    ctx.fillText("INVINCIBLE", 208, 11);
   }
+  // 파트너 거리 게이지 (위험 표시)
+  const gaugeW = 80;
+  const ratio = Math.max(0, Math.min(1, c.runner.partnerGap / PARTNER_GAP_MAX));
+  ctx.fillStyle = "rgba(255,255,255,0.25)";
+  ctx.fillRect(VW - gaugeW - 6, 4, gaugeW, 8);
+  ctx.fillStyle = ratio < 0.3 ? "#ff6a6a" : ratio < 0.6 ? "#ffd36a" : "#8be38b";
+  ctx.fillRect(VW - gaugeW - 6, 4, gaugeW * ratio, 8);
+}
+
+// ───── 러너 전용 히어로 (옆모습 + 슬라이딩 대응) ─────
+function drawRunnerHero(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  footY: number,
+  sex: Sex,
+  state: "grounded" | "jumping" | "sliding",
+  tick: number,
+  isPartner: boolean,
+) {
+  ctx.save();
+  ctx.translate(cx, footY);
+  if (state === "sliding") {
+    // 몸을 눕힘
+    ctx.translate(0, 6);
+    ctx.scale(1.15, 0.55);
+  }
+  const legSwap = Math.floor(tick * 10) % 2 === 0;
+  const isGroom = sex === "groom";
+  // 그림자
+  ctx.fillStyle = "rgba(0,0,0,0.25)";
+  ctx.beginPath();
+  ctx.ellipse(0, 2, 9, 2.5, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 몸
+  ctx.fillStyle = isGroom ? "#1f2a44" : "#f8efe8";
+  ctx.fillRect(-5, -14, 10, 11);
+  if (isGroom) {
+    // 흰 셔츠 V
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(-2, -12, 4, 7);
+    // 나비넥타이
+    ctx.fillStyle = "#c94a4a";
+    ctx.fillRect(-3, -12, 6, 2);
+    // 라펠
+    ctx.fillStyle = "#141c2e";
+    ctx.fillRect(-3, -10, 1, 6);
+    ctx.fillRect(2, -10, 1, 6);
+    // 금 단추
+    ctx.fillStyle = "#d4b86a";
+    ctx.fillRect(0, -8, 1, 1);
+  } else {
+    // 드레스 치마
+    ctx.fillStyle = "#ffe4e4";
+    ctx.fillRect(-7, -6, 14, 7);
+  }
+
+  // 얼굴
+  ctx.fillStyle = "#f8d6b5";
+  ctx.fillRect(-4, -25, 8, 9);
+  // 볼터치 (소년)
+  if (isGroom) {
+    ctx.fillStyle = "rgba(240,120,120,0.55)";
+    ctx.fillRect(-4, -19, 2, 1);
+    ctx.fillRect(2, -19, 2, 1);
+  }
+  // 머리
+  ctx.fillStyle = isGroom ? "#3d2818" : "#efe0cf";
+  if (isGroom) {
+    ctx.fillRect(-5, -28, 10, 5);
+    // 오른쪽으로 삐친 한 가닥(달리는 방향)
+    ctx.fillRect(2, -29, 3, 2);
+    ctx.fillRect(-5, -25, 3, 3);
+    ctx.fillRect(2, -25, 3, 3);
+  } else {
+    ctx.fillRect(-5, -27, 10, 4);
+    ctx.fillRect(-5, -24, 2, 3);
+    ctx.fillRect(3, -24, 2, 3);
+    // 면사포
+    ctx.fillStyle = "rgba(255,255,255,0.75)";
+    ctx.fillRect(-6, -28, 12, 2);
+    ctx.fillRect(-5, -20, 1, 6);
+    ctx.fillRect(4, -20, 1, 6);
+  }
+  // 눈 (오른쪽 바라봄)
+  ctx.fillStyle = "#1a1a1a";
+  ctx.fillRect(2, -21, 1, 2);
+
+  // 팔 — 뛰는 느낌. 파트너는 밧줄 당기는 앞팔
+  ctx.fillStyle = isGroom ? "#1f2a44" : "#f8efe8";
+  if (isPartner) {
+    // 앞으로 뻗은 팔 (밧줄 당기기)
+    ctx.fillRect(4, -12, 6, 2);
+  } else {
+    const armSwing = legSwap ? -2 : 2;
+    ctx.fillRect(-5, -11 + armSwing, 2, 5);
+    ctx.fillRect(4, -11 - armSwing, 2, 5);
+  }
+
+  // 다리 — 횡 달리기 프레임
+  ctx.fillStyle = isGroom ? "#141c2e" : "#1a1a1a";
+  if (state === "jumping") {
+    // 무릎 굽힘
+    ctx.fillRect(-3, -3, 3, 3);
+    ctx.fillRect(1, -3, 3, 3);
+  } else if (state === "sliding") {
+    // 뻗은 다리
+    ctx.fillRect(-1, -3, 7, 2);
+  } else {
+    // 달리기
+    if (legSwap) {
+      ctx.fillRect(-4, -3, 3, 4);
+      ctx.fillRect(1, -3, 3, 2);
+      ctx.fillRect(3, -2, 2, 2);
+    } else {
+      ctx.fillRect(-3, -3, 3, 2);
+      ctx.fillRect(-5, -2, 2, 2);
+      ctx.fillRect(1, -3, 3, 4);
+    }
+  }
+  ctx.restore();
+}
+
+function drawPineTree(ctx: CanvasRenderingContext2D, x: number, baseY: number) {
+  ctx.fillStyle = "#5a3a1a";
+  ctx.fillRect(x - 1, baseY - 8, 2, 8);
+  ctx.fillStyle = "#4f7a4b";
+  ctx.beginPath();
+  ctx.moveTo(x - 8, baseY - 8);
+  ctx.lineTo(x + 8, baseY - 8);
+  ctx.lineTo(x, baseY - 20);
+  ctx.closePath();
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(x - 6, baseY - 14);
+  ctx.lineTo(x + 6, baseY - 14);
+  ctx.lineTo(x, baseY - 24);
+  ctx.closePath();
+  ctx.fill();
 }
 
 function drawGuestSilhouette(ctx: CanvasRenderingContext2D, x: number, y: number, color: string) {
@@ -1782,88 +2070,110 @@ function drawGuestSilhouette(ctx: CanvasRenderingContext2D, x: number, y: number
   ctx.fillRect(x - 5, y - 8, 10, 3);
 }
 
-function drawRunnerItem(ctx: CanvasRenderingContext2D, x: number, y: number, kind: RunnerItem["kind"]) {
+function drawRunnerItem(ctx: CanvasRenderingContext2D, x: number, y: number, kind: RunnerKind, t: number) {
   switch (kind) {
-    case "ring":
-      ctx.strokeStyle = "#f2d37a";
-      ctx.lineWidth = 2;
+    case "coin": {
+      // 공중 코인 — 반짝이는 금색
+      const ph = Math.sin(t * 8) * 0.5 + 0.5;
+      ctx.fillStyle = "#f2d37a";
       ctx.beginPath();
-      ctx.arc(x, y, 7, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.fillStyle = "#e7f0ff";
-      ctx.beginPath();
-      ctx.arc(x, y - 6, 2, 0, Math.PI * 2);
+      ctx.ellipse(x, y, 6, 6, 0, 0, Math.PI * 2);
       ctx.fill();
+      ctx.fillStyle = "#c98a2a";
+      ctx.beginPath();
+      ctx.ellipse(x, y, 6 * (0.6 + ph * 0.4), 6, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = "#fff3c6";
+      ctx.fillRect(x - 2, y - 3, 1, 2);
       break;
-    case "heart":
-      drawHeart(ctx, x, y, 5, "#e94a6a");
+    }
+    case "gem": {
+      // 하트 보석
+      drawHeart(ctx, x, y, 6, "#e94a6a");
+      ctx.fillStyle = "rgba(255,255,255,0.7)";
+      ctx.fillRect(x - 2, y - 2, 1, 1);
       break;
-    case "bouquet":
+    }
+    case "bouquet": {
+      // 지면 부케 (점수 보너스 + 무적)
       ctx.fillStyle = "#6e9a6a";
-      ctx.fillRect(x - 1, y + 2, 2, 10);
+      ctx.fillRect(x - 1, y - 4, 2, 6);
       ctx.fillStyle = "#ffb5c2";
-      ctx.beginPath(); ctx.arc(x - 4, y, 3, 0, Math.PI * 2); ctx.fill();
-      ctx.beginPath(); ctx.arc(x + 4, y, 3, 0, Math.PI * 2); ctx.fill();
-      ctx.beginPath(); ctx.arc(x, y - 3, 3, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(x - 4, y - 6, 3, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(x + 4, y - 6, 3, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(x, y - 9, 3, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = "#ffd36a";
-      ctx.beginPath(); ctx.arc(x, y, 2, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(x, y - 7, 2, 0, Math.PI * 2); ctx.fill();
       break;
-    case "champagne":
-      ctx.fillStyle = "#f2d37a";
-      ctx.beginPath();
-      ctx.moveTo(x - 4, y - 8);
-      ctx.lineTo(x + 4, y - 8);
-      ctx.lineTo(x + 2, y + 4);
-      ctx.lineTo(x - 2, y + 4);
-      ctx.closePath();
-      ctx.fill();
-      ctx.fillRect(x - 1, y + 4, 2, 4);
-      ctx.fillRect(x - 3, y + 8, 6, 1);
-      break;
-    case "envelope":
+    }
+    case "stone": {
+      // 지면 장애물 — 점프로 넘어야 함 (웨딩 케이크 모양)
       ctx.fillStyle = "#ffffff";
-      ctx.fillRect(x - 7, y - 5, 14, 10);
-      ctx.strokeStyle = "#8a5a5a";
-      ctx.lineWidth = 1;
-      ctx.strokeRect(x - 7, y - 5, 14, 10);
-      ctx.beginPath();
-      ctx.moveTo(x - 7, y - 5);
-      ctx.lineTo(x, y + 1);
-      ctx.lineTo(x + 7, y - 5);
-      ctx.stroke();
-      break;
-    case "cake":
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(x - 9, y, 18, 10);
+      ctx.fillRect(x - 9, y - 6, 18, 6);
       ctx.fillStyle = "#f5c0c9";
-      ctx.fillRect(x - 6, y - 5, 12, 5);
+      ctx.fillRect(x - 6, y - 10, 12, 4);
       ctx.fillStyle = "#ffffff";
-      ctx.fillRect(x - 3, y - 9, 6, 4);
+      ctx.fillRect(x - 3, y - 14, 6, 4);
       ctx.fillStyle = "#f2d37a";
-      ctx.fillRect(x - 1, y - 12, 2, 3);
+      ctx.fillRect(x - 1, y - 17, 2, 3);
+      // 초 깜빡임
+      ctx.fillStyle = "#ff9a3a";
+      ctx.fillRect(x - 1, y - 18 + Math.sin(t * 14) * 0.5, 2, 2);
       break;
-    case "kid":
-      ctx.fillStyle = "#ffd36a";
-      ctx.fillRect(x - 4, y - 2, 8, 9);
-      ctx.fillStyle = "#f5d0b5";
-      ctx.fillRect(x - 3, y - 8, 6, 6);
-      ctx.fillStyle = "#5a3a1a";
-      ctx.fillRect(x - 4, y - 10, 8, 3);
+    }
+    case "bird": {
+      // 공중 장애물 — 슬라이드로 피해야 함 (날아오는 비둘기)
+      const flap = Math.floor(t * 8) % 2 === 0;
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(x - 5, y - 2, 10, 4);
+      ctx.fillStyle = "#e3e3e3";
+      ctx.fillRect(x + 3, y - 1, 3, 2);
+      // 날개
+      ctx.fillStyle = "#ffffff";
+      if (flap) {
+        ctx.fillRect(x - 7, y - 6, 6, 3);
+        ctx.fillRect(x + 1, y - 6, 6, 3);
+      } else {
+        ctx.fillRect(x - 6, y + 1, 6, 3);
+        ctx.fillRect(x, y + 1, 6, 3);
+      }
+      // 부리
+      ctx.fillStyle = "#f2a36a";
+      ctx.fillRect(x + 5, y, 2, 1);
+      // 눈
+      ctx.fillStyle = "#1a1a1a";
+      ctx.fillRect(x + 4, y - 1, 1, 1);
       break;
+    }
+    case "banner": {
+      // 공중 플래카드 — 슬라이드로 피해야 함
+      ctx.fillStyle = "#8a5a5a";
+      ctx.fillRect(x - 10, y - 14, 20, 2);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(x - 9, y - 12, 18, 14);
+      ctx.strokeStyle = "#c94a4a";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x - 9, y - 12, 18, 14);
+      ctx.fillStyle = "#c94a4a";
+      ctx.font = "8px ui-monospace";
+      ctx.textAlign = "center";
+      ctx.fillText("축결혼", x, y - 2);
+      ctx.textAlign = "left";
+      break;
+    }
   }
 }
 
 // ───── Ending ─────
 function drawEnding(ctx: CanvasRenderingContext2D, c: DrawCtx, cleared: boolean) {
-  ctx.fillStyle = cleared ? "#fff3ec" : "#2d1b2c";
-  ctx.fillRect(0, 0, VW, VH);
+  const t = performance.now() / 1000;
   if (cleared) {
+    ctx.fillStyle = "#fff3ec";
+    ctx.fillRect(0, 0, VW, VH);
     drawChapelPixel(ctx, VW / 2, VH / 2 - 40);
-    // 제단에서 손잡은 신랑·신부
     const cy = VH / 2 + 40;
-    drawHero(ctx, VW / 2 - 14, cy, "down", "groom", performance.now() / 1000);
-    drawHero(ctx, VW / 2 + 14, cy, "down", "bride", performance.now() / 1000);
-    // 손잡는 표시 (하트)
+    drawHero(ctx, VW / 2 - 14, cy, "down", "groom", t);
+    drawHero(ctx, VW / 2 + 14, cy, "down", "bride", t);
     drawHeart(ctx, VW / 2, cy - 8, 4, "#e94a6a");
     ctx.fillStyle = "#3d2b28";
     ctx.font = "bold 16px ui-sans-serif";
@@ -1873,15 +2183,107 @@ function drawEnding(ctx: CanvasRenderingContext2D, c: DrawCtx, cleared: boolean)
     ctx.fillText("종현 ♥ 수빈", VW / 2, VH / 2 + 96);
     ctx.fillText(`${c.nickname || "하객"} 점수 ${c.runner.score}`, VW / 2, VH / 2 + 110);
     ctx.textAlign = "left";
-  } else {
-    ctx.fillStyle = "#fff";
-    ctx.font = "bold 16px ui-sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText("GAME OVER", VW / 2, VH / 2 - 10);
-    ctx.font = "10px ui-monospace";
-    ctx.fillText("다시 도전!", VW / 2, VH / 2 + 10);
-    ctx.textAlign = "left";
+    return;
   }
+
+  // GAME OVER — 신부가 신랑을 밧줄로 잡는 엔딩 컷
+  // 배경
+  const sky = ctx.createLinearGradient(0, 0, 0, VH);
+  sky.addColorStop(0, "#2d1b2c");
+  sky.addColorStop(0.7, "#5b2e3a");
+  sky.addColorStop(1, "#8a3d3d");
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, VW, VH);
+  // 별
+  ctx.fillStyle = "#fff3c6";
+  for (let i = 0; i < 20; i++) {
+    const sx = (i * 37) % VW;
+    const sy = (i * 53) % (VH - 120);
+    ctx.fillRect(sx, sy, 1, 1);
+  }
+  // 지면
+  const GY = VH - 50;
+  ctx.fillStyle = "#6e2f2f";
+  ctx.fillRect(0, GY, VW, VH - GY);
+  ctx.fillStyle = "#8a3d3d";
+  ctx.fillRect(0, GY, VW, 3);
+  // 지면 점선
+  ctx.fillStyle = "rgba(255,255,255,0.25)";
+  for (let x = 0; x < VW; x += 20) ctx.fillRect(x, GY + 10, 10, 1);
+
+  // 신부(추격자)와 신랑(플레이어) — 선택 캐릭터에 따라 역할 교차
+  const playerSex: Sex = c.sex;
+  const catcherSex: Sex = c.sex === "groom" ? "bride" : "groom";
+  // catcher 왼쪽
+  const catcherX = 70;
+  // 플레이어 오른쪽 — 밧줄에 끌려와 기울어져 있음
+  const caughtX = VW - 90;
+  // 밧줄 (곡선)
+  const shake = Math.sin(t * 3) * 1.5;
+  ctx.strokeStyle = "#c9a06a";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(catcherX + 6, GY - 18);
+  ctx.quadraticCurveTo((catcherX + caughtX) / 2, GY - 30 + shake, caughtX - 4, GY - 20);
+  ctx.stroke();
+  // 밧줄 고리 (플레이어 몸에 감긴)
+  ctx.strokeStyle = "#c9a06a";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.ellipse(caughtX, GY - 18, 10, 12, 0, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // 캐릭터 렌더
+  drawRunnerHero(ctx, catcherX, GY, catcherSex, "grounded", t, true);
+  // 잡힌 신랑 — 몸을 기울임 + 당황 표정
+  ctx.save();
+  ctx.translate(caughtX, GY);
+  ctx.rotate(Math.sin(t * 2) * 0.05 - 0.12);
+  drawRunnerHero(ctx, 0, 0, playerSex, "grounded", t, false);
+  ctx.restore();
+  // 땀방울
+  ctx.fillStyle = "#9cd3ff";
+  ctx.fillRect(caughtX + 6, GY - 28 + Math.sin(t * 6) * 1, 2, 3);
+  ctx.fillRect(caughtX - 10, GY - 26 + Math.cos(t * 6) * 1, 2, 3);
+  // 당혹! 말풍선
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(caughtX + 2, GY - 52, 28, 14);
+  ctx.strokeStyle = "#3d2b28";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(caughtX + 2, GY - 52, 28, 14);
+  ctx.beginPath();
+  ctx.moveTo(caughtX + 10, GY - 38);
+  ctx.lineTo(caughtX + 14, GY - 34);
+  ctx.lineTo(caughtX + 16, GY - 38);
+  ctx.fillStyle = "#ffffff";
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = "#3d2b28";
+  ctx.font = "9px ui-monospace";
+  ctx.textAlign = "center";
+  ctx.fillText("헉!", caughtX + 16, GY - 42);
+
+  // 신부 말풍선 — 웃고 있음
+  ctx.fillStyle = "#ffe4e4";
+  ctx.fillRect(catcherX + 8, GY - 58, 56, 16);
+  ctx.strokeStyle = "#8a3d3d";
+  ctx.strokeRect(catcherX + 8, GY - 58, 56, 16);
+  ctx.fillStyle = "#8a3d3d";
+  ctx.font = "9px ui-monospace";
+  ctx.textAlign = "center";
+  ctx.fillText("도망 못가!", catcherX + 36, GY - 47);
+
+  // 타이틀
+  ctx.fillStyle = "#fff";
+  ctx.font = "bold 16px ui-sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText("잡혔다!", VW / 2, 40);
+  ctx.font = "10px ui-monospace";
+  ctx.fillStyle = "#ffd6d6";
+  ctx.fillText("GAME OVER — 식장으로 끌려갑니다", VW / 2, 58);
+  ctx.fillStyle = "#fff";
+  ctx.fillText(`점수 ${c.runner.score}`, VW / 2, 74);
+  ctx.textAlign = "left";
 }
 
 // 하트 유틸 (기존 유지)
