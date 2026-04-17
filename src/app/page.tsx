@@ -115,7 +115,7 @@ function SectionHead({ kicker, title }: { kicker: string; title: string }) {
   );
 }
 
-// 공통 카드 래퍼 — 외부는 흰색, 내부는 블러시 단일 톤
+// 공통 카드 래퍼 — 블러시 단일 톤
 function Card({ children }: { children: React.ReactNode }) {
   return <div className="content-card bg-[color:var(--color-blush)]">{children}</div>;
 }
@@ -197,7 +197,7 @@ function Couple() {
       </p>
       <a
         href={`tel:${p.phone}`}
-        className="mt-3 inline-block text-[18px] tracking-widest text-[color:var(--color-rose-deep)] border border-[color:var(--color-rose)]/40 rounded-full px-3 py-1 bg-white"
+        className="mt-3 inline-block text-[18px] tracking-widest text-[color:var(--color-rose-deep)] border border-[color:var(--color-rose)]/40 rounded-full px-3 py-1"
       >
         CALL
       </a>
@@ -230,7 +230,7 @@ function Countdown() {
         <SectionHead kicker="D-Day" title="우리의 그 날까지" />
         <div className="grid grid-cols-4 gap-2 text-center">
           {items.map((i) => (
-            <div key={i.l} className="rounded-xl bg-white py-5">
+            <div key={i.l} className="py-5">
               <div className="text-[1.6rem] text-[color:var(--color-rose-deep)] tabular-nums">{String(i.v).padStart(2, "0")}</div>
               <div className="mt-1 text-[18px] tracking-[0.25em] text-[color:var(--color-mute)]">{i.l}</div>
             </div>
@@ -264,7 +264,7 @@ function Calendar() {
     <section className="px-5 py-10 bg-white">
       <Card>
         <SectionHead kicker="When" title="예식일" />
-        <div className="mx-auto max-w-xs rounded-2xl bg-white p-5">
+        <div className="mx-auto max-w-xs p-5">
           <p className="text-center tracking-[0.2em] text-[color:var(--color-rose-deep)]">
             {monthName} · {year}
           </p>
@@ -324,7 +324,7 @@ function Location() {
           href={naverMapUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="group block overflow-hidden rounded-2xl bg-white"
+          className="group block overflow-hidden rounded-2xl"
         >
           <div className="relative h-56 w-full">
             <img
@@ -333,7 +333,7 @@ function Location() {
               className="h-full w-full object-cover"
               loading="lazy"
             />
-            <div className="pointer-events-none absolute left-3 top-3 inline-flex items-center gap-1.5 rounded-full bg-white/95 px-3 py-1.5 shadow-sm">
+            <div className="pointer-events-none absolute left-3 top-3 inline-flex items-center gap-1.5 rounded-full bg-[color:var(--color-blush-soft)]/95 px-3 py-1.5 shadow-sm">
               <span className="inline-block h-2 w-2 rounded-full bg-[#03C75A]" />
               <span className="text-[18px] font-semibold tracking-wider text-[color:var(--color-charcoal)]">NAVER MAP</span>
             </div>
@@ -348,12 +348,12 @@ function Location() {
           <p className="text-[13px] text-[color:var(--color-mute)]">{data.venue.phone}</p>
           <button
             onClick={copyAddress}
-            className="mt-3 rounded-full border border-[color:var(--color-rose)]/40 bg-white px-4 py-1.5 text-[18px] tracking-widest text-[color:var(--color-rose-deep)]"
+            className="mt-3 rounded-full border border-[color:var(--color-rose)]/40 px-4 py-1.5 text-[18px] tracking-widest text-[color:var(--color-rose-deep)]"
           >
             주소 복사
           </button>
         </div>
-        <div className="mt-7 space-y-3 rounded-2xl bg-white p-5 text-[13px] text-[color:var(--color-charcoal)]/85">
+        <div className="mt-7 space-y-3 p-5 text-[13px] text-[color:var(--color-charcoal)]/85">
           <div className="flex gap-3">
             <span className="min-w-[56px] text-[color:var(--color-rose-deep)] text-[14px]">지하철</span>
             <span>{data.venue.subway}</span>
@@ -385,7 +385,7 @@ function Account() {
       <div>
         <button
           onClick={() => toggle(k)}
-          className="flex w-full items-center justify-between rounded-2xl bg-white px-5 py-4"
+          className="flex w-full items-center justify-between rounded-2xl px-5 py-4 border-b border-[color:var(--color-rose)]/20"
         >
           <span className="text-[13px] tracking-wide">
             <span className="text-[color:var(--color-mute)]">{role}</span>
@@ -394,11 +394,11 @@ function Account() {
           <span className="text-[color:var(--color-rose-deep)] text-lg leading-none">{isOpen ? "−" : "+"}</span>
         </button>
         {isOpen && (
-          <div className="mt-1 flex items-center justify-between rounded-2xl bg-white/70 px-5 py-3 text-[13px]">
+          <div className="mt-1 flex items-center justify-between px-5 py-3 text-[13px]">
             <span className="text-[color:var(--color-charcoal)]">{account}</span>
             <button
               onClick={() => navigator.clipboard?.writeText(account)}
-              className="text-[18px] tracking-widest text-[color:var(--color-rose-deep)] border border-[color:var(--color-rose)]/40 rounded-full px-3 py-1 bg-white"
+              className="text-[18px] tracking-widest text-[color:var(--color-rose-deep)] border border-[color:var(--color-rose)]/40 rounded-full px-3 py-1"
             >
               복사
             </button>
@@ -457,9 +457,9 @@ function Guestbook() {
           {list.map((g, i) => (
             <div
               key={i}
-              className="relative bg-white rounded-2xl px-5 pt-6 pb-5 shadow-[0_2px_14px_rgba(180,160,180,0.08)]"
+              className="relative px-5 pt-6 pb-5 border-t border-[color:var(--color-rose)]/20"
             >
-              <div className="absolute -top-2 left-5 inline-flex items-center gap-1.5 bg-[color:var(--color-rose)]/15 rounded-full px-3 py-0.5">
+              <div className="absolute -top-2 left-5 inline-flex items-center gap-1.5 bg-[color:var(--color-blush)] rounded-full px-3 py-0.5">
                 <span className="h-1.5 w-1.5 rounded-full bg-[color:var(--color-rose-deep)]" />
                 <span className="text-[11px] tracking-widest text-[color:var(--color-rose-deep)]">{g.name}</span>
               </div>
@@ -473,7 +473,7 @@ function Guestbook() {
 
         <button
           onClick={() => setOpen(true)}
-          className="mt-7 mx-auto block rounded-full bg-white border border-[color:var(--color-rose)]/40 px-6 py-2.5 text-[13px] tracking-[0.25em] text-[color:var(--color-rose-deep)]"
+          className="mt-7 mx-auto block rounded-full border border-[color:var(--color-rose)]/40 px-6 py-2.5 text-[13px] tracking-[0.25em] text-[color:var(--color-rose-deep)]"
         >
           + 메시지 남기기
         </button>

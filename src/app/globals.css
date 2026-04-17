@@ -1,21 +1,17 @@
 @import "tailwindcss";
 
 :root {
-  /* 화사한 파스텔 팔레트 — 흰 베이스 + 카드만 색상 */
+  /* 단일 블러시 톤 — 배경은 블러시, 서브 영역은 약간 옅은 블러시로 통일 */
   --paper: #ffffff;
   --paper-soft: #fffafa;
   --blush: #fff0f1;
+  --blush-soft: #fff7f8;
   --blush-deep: #fde6e8;
-  --peach: #fff1e6;
-  --cream: #fff9ec;
-  --mint: #ecf7f1;
-  --sky: #eef4f9;
   --rose: #f4a8aa;
   --rose-deep: #e07b80;
   --charcoal: #3a3633;
   --mute: #a89e98;
   --line: #f3e9e6;
-  --gold: #d4af6f;
   --ink: #3a3633;
   --ivory: #ffffff;
 
@@ -26,17 +22,13 @@
   --color-paper: var(--paper);
   --color-paper-soft: var(--paper-soft);
   --color-blush: var(--blush);
+  --color-blush-soft: var(--blush-soft);
   --color-blush-deep: var(--blush-deep);
-  --color-peach: var(--peach);
-  --color-cream: var(--cream);
-  --color-mint: var(--mint);
-  --color-sky: var(--sky);
   --color-rose: var(--rose);
   --color-rose-deep: var(--rose-deep);
   --color-charcoal: var(--charcoal);
   --color-mute: var(--mute);
   --color-line: var(--line);
-  --color-gold: var(--gold);
   --color-ink: var(--ink);
   --color-ivory: var(--ivory);
   --font-active: var(--font-active);
