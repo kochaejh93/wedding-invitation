@@ -563,22 +563,26 @@ function Guestbook() {
   );
 }
 
+// 횡스크롤 플랫포머 — 신랑이 결혼식장까지 달린다
 type GameState = "idle" | "playing" | "cleared" | "over";
 
-type Entity = {
-  lane: 0 | 1 | 2;
+type EntKind = "ring" | "heart" | "champagne" | "envelope" | "cake" | "bench";
+
+type Ent = {
+  kind: EntKind;
+  x: number;
   y: number;
-  kind: "ring" | "heart" | "champagne" | "envelope" | "cake";
-  vy: number;
+  collected?: boolean;
 };
 
-const ITEM_COLOR: Record<Entity["kind"], string> = {
-  ring: "#e89378",
-  heart: "#f0a3a3",
-  champagne: "#d4b876",
-  envelope: "#b29c91",
-  cake: "#8a5a4f",
-};
+const GAME_W = 480;
+const GAME_H = 260;
+const GROUND_Y = 210;
+const PLAYER_X = 80;
+const PLAYER_W = 18;
+const PLAYER_H = 34;
+const JUMP_V = -420;
+const GRAVITY = 1200;
 
 function MiniGame() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -587,48 +591,43 @@ function MiniGame() {
   const [score, setScore] = useState(0);
   const [best, setBest] = useState(0);
   const [remain, setRemain] = useState(60);
+  const [lives, setLives] = useState(3);
 
-  const W = 320;
-  const H = 420;
-  const LANE_W = W / 3;
-  const PLAYER_Y = H - 70;
-
-  const laneRef = useRef<0 | 1 | 2>(1);
-  const entitiesRef = useRef<Entity[]>([]);
-  const spawnTimerRef = useRef(0);
+  const playerYRef = useRef(GROUND_Y);
+  const vyRef = useRef(0);
+  const onGroundRef = useRef(true);
+  const animFrameRef = useRef(0);
+  const animTimerRef = useRef(0);
+  const entsRef = useRef<Ent[]>([]);
+  const spawnTimerRef = useRef(0.8);
+  const scrollRef = useRef(0);
+  const speedRef = useRef(160);
   const scoreRef = useRef(0);
   const invincibleRef = useRef(0);
-  const lastTsRef = useRef<number | null>(null);
   const timeLeftRef = useRef(60);
+  const livesRef = useRef(3);
+  const lastTsRef = useRef<number | null>(null);
   const rafRef = useRef<number | null>(null);
 
   useEffect(() => {
     try {
-      const raw = localStorage.getItem("wedding_mini_best");
+      const raw = localStorage.getItem("wedding_runner_best_v2");
       if (raw) setBest(parseInt(raw, 10) || 0);
     } catch {}
   }, []);
 
-  // idle 상태에서도 캔버스에 기본 배경 + 레인 가이드 그려둔다 (빈 박스 방지)
+  // idle 화면: 배경 + 신랑 프리뷰
   useEffect(() => {
     if (state === "playing") return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    ctx.fillStyle = "#fdfbf7";
-    ctx.fillRect(0, 0, W, H);
-    ctx.strokeStyle = "rgba(232, 147, 120, 0.18)";
-    ctx.lineWidth = 1;
-    for (let i = 1; i < 3; i++) {
-      ctx.beginPath();
-      ctx.moveTo(LANE_W * i, 0);
-      ctx.lineTo(LANE_W * i, H);
-      ctx.stroke();
-    }
-    // 대기용 플레이어 하트
-    drawHeart(ctx, LANE_W * 1.5, H - 70, 15, "#e89378");
-  }, [state, LANE_W]);
+    drawBackground(ctx, 0);
+    drawGround(ctx, 0);
+    drawChapel(ctx, GAME_W - 110, 0);
+    drawGroomPixel(ctx, PLAYER_X, GROUND_Y, 0);
+  }, [state]);
 
   const syncState = useCallback((s: GameState) => {
     stateRef.current = s;
@@ -636,15 +635,23 @@ function MiniGame() {
   }, []);
 
   const reset = useCallback(() => {
-    laneRef.current = 1;
-    entitiesRef.current = [];
-    spawnTimerRef.current = 0;
+    entsRef.current = [];
+    spawnTimerRef.current = 1.2;
+    scrollRef.current = 0;
+    speedRef.current = 160;
     scoreRef.current = 0;
-    invincibleRef.current = 0;
     timeLeftRef.current = 60;
+    livesRef.current = 3;
+    invincibleRef.current = 0;
+    playerYRef.current = GROUND_Y;
+    vyRef.current = 0;
+    onGroundRef.current = true;
     lastTsRef.current = null;
+    animFrameRef.current = 0;
+    animTimerRef.current = 0;
     setScore(0);
     setRemain(60);
+    setLives(3);
   }, []);
 
   const endGame = useCallback(
@@ -653,7 +660,7 @@ function MiniGame() {
       try {
         if (scoreRef.current > best) {
           setBest(scoreRef.current);
-          localStorage.setItem("wedding_mini_best", String(scoreRef.current));
+          localStorage.setItem("wedding_runner_best_v2", String(scoreRef.current));
         }
       } catch {}
     },
@@ -665,24 +672,24 @@ function MiniGame() {
     syncState("playing");
   }, [reset, syncState]);
 
-  const moveLane = useCallback((dir: -1 | 1) => {
+  const jump = useCallback(() => {
     if (stateRef.current !== "playing") return;
-    const next = laneRef.current + dir;
-    if (next < 0 || next > 2) return;
-    laneRef.current = next as 0 | 1 | 2;
+    if (!onGroundRef.current) return;
+    vyRef.current = JUMP_V;
+    onGroundRef.current = false;
   }, []);
 
-  // 키보드 컨트롤
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "ArrowLeft") moveLane(-1);
-      else if (e.key === "ArrowRight") moveLane(1);
+      if (e.key === " " || e.key === "ArrowUp" || e.key === "w" || e.key === "W") {
+        e.preventDefault();
+        jump();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [moveLane]);
+  }, [jump]);
 
-  // 게임 루프
   useEffect(() => {
     if (state !== "playing") return;
     const canvas = canvasRef.current;
@@ -696,10 +703,9 @@ function MiniGame() {
       const dt = Math.min(0.05, (ts - last) / 1000);
       lastTsRef.current = ts;
 
-      // 타이머
       timeLeftRef.current -= dt;
       if (timeLeftRef.current <= 0) {
-        scoreRef.current += 500; // 생존 보너스
+        scoreRef.current += 500;
         setScore(scoreRef.current);
         setRemain(0);
         endGame("cleared");
@@ -707,107 +713,120 @@ function MiniGame() {
       }
       setRemain(Math.max(0, Math.ceil(timeLeftRef.current)));
 
-      // 무적 감소
       if (invincibleRef.current > 0) invincibleRef.current -= dt;
 
-      // 스폰
+      // 시간 지남에 따라 가속
+      speedRef.current = Math.min(280, speedRef.current + 3 * dt);
+
+      // 점프 물리
+      vyRef.current += GRAVITY * dt;
+      playerYRef.current += vyRef.current * dt;
+      if (playerYRef.current >= GROUND_Y) {
+        playerYRef.current = GROUND_Y;
+        vyRef.current = 0;
+        onGroundRef.current = true;
+      }
+
+      // 달리기 애니메이션
+      if (onGroundRef.current) {
+        animTimerRef.current += dt;
+        if (animTimerRef.current > 0.11) {
+          animTimerRef.current = 0;
+          animFrameRef.current = 1 - animFrameRef.current;
+        }
+      }
+
+      scrollRef.current += speedRef.current * dt;
+
+      // 엔티티 스폰
       spawnTimerRef.current -= dt;
       if (spawnTimerRef.current <= 0) {
-        spawnTimerRef.current = 0.55 + Math.random() * 0.35;
+        spawnTimerRef.current = 0.75 + Math.random() * 0.55;
         const r = Math.random();
-        const kind: Entity["kind"] =
-          r < 0.25 ? "ring" : r < 0.5 ? "heart" : r < 0.62 ? "champagne" : r < 0.85 ? "envelope" : "cake";
-        entitiesRef.current.push({
-          lane: Math.floor(Math.random() * 3) as 0 | 1 | 2,
-          y: -30,
-          kind,
-          vy: 170 + Math.random() * 60,
-        });
+        let kind: EntKind;
+        if (r < 0.22) kind = "ring";
+        else if (r < 0.4) kind = "heart";
+        else if (r < 0.48) kind = "champagne";
+        else if (r < 0.7) kind = "envelope";
+        else if (r < 0.88) kind = "cake";
+        else kind = "bench";
+
+        let ey = GROUND_Y;
+        if (kind === "ring" || kind === "heart" || kind === "champagne") {
+          ey = GROUND_Y - 55 - Math.random() * 35;
+        }
+        entsRef.current.push({ kind, x: GAME_W + 30, y: ey });
       }
 
-      // 엔티티 업데이트 + 충돌
-      const survivors: Entity[] = [];
-      for (const e of entitiesRef.current) {
-        e.y += e.vy * dt;
-        const hit =
-          e.lane === laneRef.current &&
-          e.y > PLAYER_Y - 26 &&
-          e.y < PLAYER_Y + 26;
-        if (hit) {
-          if (e.kind === "ring") scoreRef.current += 100;
-          else if (e.kind === "heart") scoreRef.current += 50;
-          else if (e.kind === "champagne") {
-            scoreRef.current += 150;
-            invincibleRef.current = 3;
-          } else if (e.kind === "envelope") {
-            if (invincibleRef.current <= 0) {
-              scoreRef.current = Math.max(0, scoreRef.current - 100);
-            }
+      // 업데이트 + 충돌
+      const survivors: Ent[] = [];
+      const px = PLAYER_X;
+      const pyCenter = playerYRef.current - PLAYER_H / 2;
+      for (const e of entsRef.current) {
+        e.x -= speedRef.current * dt;
+        if (e.x < -60) continue;
+
+        if (!e.collected) {
+          let hitR = 18;
+          let ecy = e.y;
+          if (e.kind === "envelope" || e.kind === "bench") {
+            ecy = e.y - 10;
+            hitR = 16;
           } else if (e.kind === "cake") {
-            if (invincibleRef.current <= 0) {
-              setScore(scoreRef.current);
-              endGame("over");
-              return;
-            }
+            ecy = e.y - 18;
+            hitR = 22;
           }
-          setScore(scoreRef.current);
-          continue;
+          const dx = Math.abs(e.x - px);
+          const dy = Math.abs(ecy - pyCenter);
+          const hit = dx < hitR && dy < hitR + 6;
+
+          if (hit) {
+            if (e.kind === "ring") {
+              scoreRef.current += 100;
+              e.collected = true;
+              setScore(scoreRef.current);
+            } else if (e.kind === "heart") {
+              scoreRef.current += 50;
+              e.collected = true;
+              setScore(scoreRef.current);
+            } else if (e.kind === "champagne") {
+              scoreRef.current += 150;
+              invincibleRef.current = 3;
+              e.collected = true;
+              setScore(scoreRef.current);
+            } else if (e.kind === "envelope" || e.kind === "bench" || e.kind === "cake") {
+              if (invincibleRef.current <= 0) {
+                livesRef.current -= 1;
+                invincibleRef.current = 1.2;
+                scoreRef.current = Math.max(0, scoreRef.current - 50);
+                setScore(scoreRef.current);
+                setLives(livesRef.current);
+                e.collected = true;
+                if (livesRef.current <= 0) {
+                  endGame("over");
+                  return;
+                }
+              }
+            }
+            continue;
+          }
         }
-        if (e.y < H + 30) survivors.push(e);
+        survivors.push(e);
       }
-      entitiesRef.current = survivors;
+      entsRef.current = survivors;
 
       // 렌더
-      ctx.fillStyle = "#fdfbf7";
-      ctx.fillRect(0, 0, W, H);
+      drawBackground(ctx, scrollRef.current);
+      drawGround(ctx, scrollRef.current);
 
-      // 레인 가이드
-      ctx.strokeStyle = "rgba(232, 147, 120, 0.18)";
-      ctx.lineWidth = 1;
-      for (let i = 1; i < 3; i++) {
-        ctx.beginPath();
-        ctx.moveTo(LANE_W * i, 0);
-        ctx.lineTo(LANE_W * i, H);
-        ctx.stroke();
-      }
+      // 멀리 보이는 예식장 (골인 지점 느낌)
+      const chapelX = GAME_W - 110 + Math.sin(scrollRef.current * 0.003) * 4;
+      drawChapel(ctx, chapelX, scrollRef.current);
 
-      // 엔티티
-      for (const e of entitiesRef.current) {
-        const cx = e.lane * LANE_W + LANE_W / 2;
-        ctx.fillStyle = ITEM_COLOR[e.kind];
-        if (e.kind === "ring") {
-          ctx.beginPath();
-          ctx.arc(cx, e.y, 12, 0, Math.PI * 2);
-          ctx.lineWidth = 4;
-          ctx.strokeStyle = ITEM_COLOR.ring;
-          ctx.stroke();
-        } else if (e.kind === "heart") {
-          drawHeart(ctx, cx, e.y, 11, ITEM_COLOR.heart);
-        } else if (e.kind === "champagne") {
-          ctx.fillRect(cx - 6, e.y - 12, 12, 22);
-          ctx.beginPath();
-          ctx.arc(cx, e.y - 14, 4, 0, Math.PI * 2);
-          ctx.fill();
-        } else if (e.kind === "envelope") {
-          ctx.fillRect(cx - 14, e.y - 9, 28, 18);
-          ctx.strokeStyle = "#fff";
-          ctx.lineWidth = 1.2;
-          ctx.beginPath();
-          ctx.moveTo(cx - 14, e.y - 9);
-          ctx.lineTo(cx, e.y + 3);
-          ctx.lineTo(cx + 14, e.y - 9);
-          ctx.stroke();
-        } else if (e.kind === "cake") {
-          ctx.fillRect(cx - 14, e.y - 6, 28, 14);
-          ctx.fillStyle = "#f0a3a3";
-          ctx.fillRect(cx - 14, e.y - 10, 28, 5);
-        }
-      }
+      for (const e of entsRef.current) drawEntity(ctx, e);
 
-      // 플레이어 (블러시+로즈 하트)
-      const px = laneRef.current * LANE_W + LANE_W / 2;
-      const blink = invincibleRef.current > 0 && Math.floor(ts / 80) % 2 === 0;
-      drawHeart(ctx, px, PLAYER_Y, 15, blink ? "#f5b8a8" : "#e89378");
+      const blink = invincibleRef.current > 0 && Math.floor(ts / 70) % 2 === 0;
+      if (!blink) drawGroomPixel(ctx, px, playerYRef.current, animFrameRef.current);
 
       rafRef.current = requestAnimationFrame(loop);
     };
@@ -818,26 +837,10 @@ function MiniGame() {
     };
   }, [state, endGame]);
 
-  // 터치 핸들러 — 좌우 스와이프 + 좌우 탭
-  const touchStartX = useRef<number | null>(null);
   const onTouchStart = (e: React.TouchEvent) => {
     if (stateRef.current !== "playing") return;
-    touchStartX.current = e.touches[0].clientX;
-  };
-  const onTouchEnd = (e: React.TouchEvent) => {
-    if (stateRef.current !== "playing") return;
-    if (touchStartX.current == null) return;
-    const dx = e.changedTouches[0].clientX - touchStartX.current;
-    if (Math.abs(dx) > 18) {
-      moveLane(dx > 0 ? 1 : -1);
-    } else {
-      // 탭 위치로 이동
-      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-      const x = e.changedTouches[0].clientX - rect.left;
-      if (x < rect.width / 3) moveLane(-1);
-      else if (x > (rect.width * 2) / 3) moveLane(1);
-    }
-    touchStartX.current = null;
+    e.preventDefault();
+    jump();
   };
 
   return (
@@ -845,12 +848,12 @@ function MiniGame() {
       <Card>
         <SectionHead kicker="Mini Game" title="웨딩 러너" />
         <p className="mb-5 text-center text-[13px] text-[color:var(--color-mute)] leading-loose">
-          60초 안에 반지 · 하트 · 샴페인을 모으고
+          신랑이 예식장을 향해 달립니다.
           <br />
-          봉투와 케이크를 피해주세요.
+          탭 또는 스페이스로 점프해 장애물을 피하고 반지 · 하트 · 샴페인을 모아주세요.
         </p>
 
-        <div className="mx-auto max-w-[320px]">
+        <div className="mx-auto max-w-[480px]">
           <div className="mb-3 flex items-center justify-between text-[12px] tracking-widest text-[color:var(--color-mute)]">
             <span>
               SCORE <b className="ml-1 text-[color:var(--color-rose-deep)] text-base">{score}</b>
@@ -859,22 +862,30 @@ function MiniGame() {
               TIME <b className="ml-1 text-[color:var(--color-rose-deep)] text-base">{remain}</b>
             </span>
             <span>
+              LIFE <b className="ml-1 text-[color:var(--color-rose-deep)] text-base">{"♥".repeat(Math.max(0, lives))}</b>
+            </span>
+            <span>
               BEST <b className="ml-1 text-[color:var(--color-charcoal)] text-base">{best}</b>
             </span>
           </div>
 
           <div
             className="relative overflow-hidden rounded-2xl border border-[color:var(--color-rose)]/25 bg-[#fdfbf7]"
-            style={{ touchAction: state === "playing" ? "none" : "auto" }}
+            style={{ touchAction: state === "playing" ? "none" : "auto", imageRendering: "pixelated" }}
             onTouchStart={onTouchStart}
-            onTouchEnd={onTouchEnd}
           >
-            <canvas ref={canvasRef} width={W} height={H} className="block w-full h-auto select-none" />
+            <canvas
+              ref={canvasRef}
+              width={GAME_W}
+              height={GAME_H}
+              className="block w-full h-auto select-none"
+              style={{ imageRendering: "pixelated" }}
+            />
 
             {state === "idle" && (
               <GameOverlay
                 title="Wedding Runner"
-                description="좌우 스와이프 · 화살표 · 좌우 탭"
+                description="탭 또는 스페이스로 점프!"
                 btn="시작하기"
                 onClick={start}
               />
@@ -882,53 +893,277 @@ function MiniGame() {
             {state === "cleared" && (
               <GameOverlay
                 title="결혼했다! 🎉"
-                description={`60초 생존 성공 · 보너스 +500\n최종 점수 ${score}`}
+                description={`60초 완주 · 보너스 +500\n최종 점수 ${score}`}
                 btn="다시 하기"
                 onClick={start}
               />
             )}
             {state === "over" && (
               <GameOverlay
-                title="게임 오버"
-                description={`케이크에 부딪혔습니다.\n최종 점수 ${score}`}
+                title="GAME OVER"
+                description={`최종 점수 ${score}`}
                 btn="다시 하기"
                 onClick={start}
               />
             )}
           </div>
 
-          <div className="mt-3 grid grid-cols-2 gap-2 sm:hidden">
+          <div className="mt-3 sm:hidden">
             <button
               onTouchStart={(e) => {
                 e.preventDefault();
-                moveLane(-1);
+                jump();
               }}
-              className="py-3 rounded-xl border border-[color:var(--color-rose)]/30 text-[color:var(--color-rose-deep)]"
+              className="w-full py-4 rounded-xl border border-[color:var(--color-rose)]/30 text-[color:var(--color-rose-deep)] tracking-[0.3em] text-[13px]"
             >
-              ← LEFT
-            </button>
-            <button
-              onTouchStart={(e) => {
-                e.preventDefault();
-                moveLane(1);
-              }}
-              className="py-3 rounded-xl border border-[color:var(--color-rose)]/30 text-[color:var(--color-rose-deep)]"
-            >
-              RIGHT →
+              ↑ JUMP
             </button>
           </div>
 
           <div className="mt-5 grid grid-cols-5 gap-1 text-[11px] tracking-wide text-[color:var(--color-mute)] text-center">
-            <LegendDot color={ITEM_COLOR.ring} label="반지 +100" />
-            <LegendDot color={ITEM_COLOR.heart} label="하트 +50" />
-            <LegendDot color={ITEM_COLOR.champagne} label="샴페인 +150" />
-            <LegendDot color={ITEM_COLOR.envelope} label="봉투 −100" />
-            <LegendDot color={ITEM_COLOR.cake} label="케이크 OUT" />
+            <LegendDot color="#e89378" label="반지 +100" />
+            <LegendDot color="#f0a3a3" label="하트 +50" />
+            <LegendDot color="#d4b876" label="샴페인 +150" />
+            <LegendDot color="#b29c91" label="봉투 −HP" />
+            <LegendDot color="#8a5a4f" label="케이크 −HP" />
           </div>
         </div>
       </Card>
     </section>
   );
+}
+
+// ─── 픽셀 아트 스프라이트 ────────────────────────────────
+function drawGroomPixel(ctx: CanvasRenderingContext2D, cx: number, footY: number, frame: number) {
+  const s = 2; // 픽셀 스케일
+  const ox = Math.round(cx - 8);
+  const oy = Math.round(footY - 17 * s);
+
+  const rect = (col: number, row: number, w: number, h: number, color: string) => {
+    ctx.fillStyle = color;
+    ctx.fillRect(ox + col * s, oy + row * s, w * s, h * s);
+  };
+
+  const HAIR = "#2b1810";
+  const SKIN = "#f9d3b4";
+  const CHEEK = "#f0a3a3";
+  const EYE = "#2b1810";
+  const SUIT = "#2b2824";
+  const SHIRT = "#ffffff";
+  const BOW = "#e89378";
+  const PANTS = "#1a1715";
+  const SHOE = "#0a0807";
+
+  // 머리
+  rect(2, 0, 4, 1, HAIR);
+  rect(1, 1, 6, 1, HAIR);
+  // 얼굴
+  rect(1, 2, 6, 1, SKIN);
+  rect(1, 2, 6, 1, SKIN);
+  rect(2, 3, 4, 1, SKIN);
+  rect(1, 4, 6, 1, SKIN);
+  // 눈
+  rect(2, 3, 1, 1, EYE);
+  rect(5, 3, 1, 1, EYE);
+  // 볼
+  rect(1, 4, 1, 1, CHEEK);
+  rect(6, 4, 1, 1, CHEEK);
+  // 턱
+  rect(2, 5, 4, 1, SKIN);
+  // 어깨 + 턱시도
+  rect(0, 6, 8, 1, SUIT);
+  rect(0, 7, 2, 4, SUIT); // 왼쪽 옷깃
+  rect(6, 7, 2, 4, SUIT); // 오른쪽 옷깃
+  rect(2, 7, 4, 4, SHIRT); // 셔츠
+  rect(3, 7, 2, 1, BOW); // 나비넥타이
+  // 허리
+  rect(0, 11, 8, 1, SUIT);
+  // 다리
+  if (frame === 0) {
+    rect(1, 12, 2, 3, PANTS);
+    rect(5, 12, 2, 3, PANTS);
+    rect(1, 15, 3, 1, SHOE);
+    rect(4, 15, 3, 1, SHOE);
+  } else {
+    rect(2, 12, 2, 3, PANTS);
+    rect(4, 12, 2, 3, PANTS);
+    rect(2, 15, 3, 1, SHOE);
+    rect(3, 15, 3, 1, SHOE);
+  }
+}
+
+function drawChapel(ctx: CanvasRenderingContext2D, x: number, scroll: number) {
+  // 배경 예식장 (골인 지점 이미지)
+  const y = GROUND_Y - 80;
+  const parallax = Math.sin(scroll * 0.004) * 2;
+  ctx.fillStyle = "#fffdf8";
+  ctx.fillRect(x - 40, y + 20 + parallax, 80, 60);
+  // 지붕
+  ctx.fillStyle = "#e89378";
+  ctx.beginPath();
+  ctx.moveTo(x - 45, y + 20 + parallax);
+  ctx.lineTo(x, y - 10 + parallax);
+  ctx.lineTo(x + 45, y + 20 + parallax);
+  ctx.closePath();
+  ctx.fill();
+  // 십자 장식
+  ctx.fillStyle = "#c97a62";
+  ctx.fillRect(x - 2, y - 22 + parallax, 4, 14);
+  ctx.fillRect(x - 6, y - 18 + parallax, 12, 3);
+  // 문
+  ctx.fillStyle = "#8a5a4f";
+  ctx.fillRect(x - 10, y + 50 + parallax, 20, 30);
+  ctx.fillStyle = "#d4b876";
+  ctx.fillRect(x - 1, y + 55 + parallax, 2, 6);
+  // 창문
+  ctx.fillStyle = "#d4b876";
+  ctx.fillRect(x - 28, y + 35 + parallax, 10, 12);
+  ctx.fillRect(x + 18, y + 35 + parallax, 10, 12);
+}
+
+function drawBackground(ctx: CanvasRenderingContext2D, scroll: number) {
+  // 하늘 그라디언트
+  const g = ctx.createLinearGradient(0, 0, 0, GAME_H);
+  g.addColorStop(0, "#ffe4d6");
+  g.addColorStop(0.6, "#fff5ec");
+  g.addColorStop(1, "#fdfbf7");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, GAME_W, GAME_H);
+
+  // 태양
+  ctx.fillStyle = "rgba(255, 230, 200, 0.9)";
+  ctx.beginPath();
+  ctx.arc(GAME_W - 60, 50, 22, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 구름 (느린 패럴랙스)
+  const cs = scroll * 0.2;
+  ctx.fillStyle = "rgba(255, 255, 255, 0.75)";
+  for (let i = 0; i < 5; i++) {
+    const seed = i * 157 + 40;
+    const baseX = ((seed - cs) % (GAME_W + 80) + GAME_W + 80) % (GAME_W + 80) - 40;
+    const cy = 28 + (i % 3) * 20;
+    ctx.beginPath();
+    ctx.arc(baseX, cy, 12, 0, Math.PI * 2);
+    ctx.arc(baseX + 12, cy + 3, 10, 0, Math.PI * 2);
+    ctx.arc(baseX - 12, cy + 3, 8, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // 먼 언덕
+  const hs = scroll * 0.5;
+  ctx.fillStyle = "rgba(232, 147, 120, 0.25)";
+  for (let i = 0; i < 6; i++) {
+    const seed = i * 110;
+    const baseX = ((seed - hs) % (GAME_W + 140) + GAME_W + 140) % (GAME_W + 140) - 70;
+    ctx.beginPath();
+    ctx.arc(baseX, GROUND_Y + 15, 55, Math.PI, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // 가까운 꽃/나무 실루엣
+  const ts = scroll * 0.85;
+  for (let i = 0; i < 8; i++) {
+    const seed = i * 78 + 10;
+    const baseX = ((seed - ts) % (GAME_W + 60) + GAME_W + 60) % (GAME_W + 60) - 30;
+    // 나무
+    ctx.fillStyle = "rgba(138, 90, 79, 0.35)";
+    ctx.fillRect(baseX - 2, GROUND_Y - 18, 4, 18);
+    ctx.fillStyle = "rgba(240, 163, 163, 0.6)";
+    ctx.beginPath();
+    ctx.arc(baseX, GROUND_Y - 22, 8, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function drawGround(ctx: CanvasRenderingContext2D, scroll: number) {
+  // 지면
+  ctx.fillStyle = "#f5d4c4";
+  ctx.fillRect(0, GROUND_Y + 2, GAME_W, GAME_H - GROUND_Y - 2);
+  // 경계선
+  ctx.fillStyle = "#e89378";
+  ctx.fillRect(0, GROUND_Y + 2, GAME_W, 2);
+  // 타일 점 (스크롤 효과)
+  ctx.fillStyle = "rgba(201, 122, 98, 0.5)";
+  const step = 24;
+  const offset = scroll % step;
+  for (let x = -offset; x < GAME_W; x += step) {
+    ctx.fillRect(x, GROUND_Y + 10, 6, 2);
+    ctx.fillRect(x + 12, GROUND_Y + 22, 4, 2);
+  }
+}
+
+function drawEntity(ctx: CanvasRenderingContext2D, e: Ent) {
+  if (e.collected) return;
+  const x = e.x;
+  const y = e.y;
+
+  if (e.kind === "ring") {
+    // 금반지 + 다이아
+    ctx.strokeStyle = "#e89378";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(x, y, 9, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.moveTo(x, y - 14);
+    ctx.lineTo(x + 4, y - 9);
+    ctx.lineTo(x, y - 4);
+    ctx.lineTo(x - 4, y - 9);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = "#d4b876";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  } else if (e.kind === "heart") {
+    drawHeart(ctx, x, y, 10, "#f0a3a3");
+  } else if (e.kind === "champagne") {
+    ctx.fillStyle = "#d4b876";
+    ctx.fillRect(x - 4, y - 12, 8, 18);
+    ctx.fillStyle = "#8a5a4f";
+    ctx.fillRect(x - 3, y - 16, 6, 4);
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(x - 4, y - 6, 8, 3);
+    ctx.fillStyle = "#e89378";
+    ctx.beginPath();
+    ctx.arc(x, y - 18, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (e.kind === "envelope") {
+    // 축의금 봉투 (바닥 장애물)
+    ctx.fillStyle = "#fffdf8";
+    ctx.fillRect(x - 14, y - 18, 28, 18);
+    ctx.strokeStyle = "#e89378";
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(x - 14, y - 18, 28, 18);
+    ctx.beginPath();
+    ctx.moveTo(x - 14, y - 18);
+    ctx.lineTo(x, y - 6);
+    ctx.lineTo(x + 14, y - 18);
+    ctx.stroke();
+    drawHeart(ctx, x, y - 10, 3.5, "#e89378");
+  } else if (e.kind === "bench") {
+    // 교회 벤치 (낮은 장애물)
+    ctx.fillStyle = "#8a5a4f";
+    ctx.fillRect(x - 18, y - 16, 36, 5);
+    ctx.fillRect(x - 16, y - 11, 2, 11);
+    ctx.fillRect(x + 14, y - 11, 2, 11);
+  } else if (e.kind === "cake") {
+    // 3단 웨딩 케이크 (큰 장애물 — 높이 점프 필요)
+    ctx.fillStyle = "#fffdf8";
+    ctx.fillRect(x - 16, y - 12, 32, 12);
+    ctx.fillRect(x - 12, y - 22, 24, 10);
+    ctx.fillRect(x - 8, y - 32, 16, 10);
+    ctx.fillStyle = "#f0a3a3";
+    ctx.fillRect(x - 16, y - 8, 32, 2);
+    ctx.fillRect(x - 12, y - 18, 24, 2);
+    ctx.fillRect(x - 8, y - 28, 16, 2);
+    // 장식
+    ctx.fillStyle = "#e89378";
+    ctx.beginPath();
+    ctx.arc(x, y - 36, 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
 }
 
 function GameOverlay({
