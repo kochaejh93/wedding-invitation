@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import {
   Noto_Sans_KR,
   Noto_Serif_KR,
@@ -89,8 +89,29 @@ const jua = Jua({
 });
 
 export const metadata: Metadata = {
-  title: "우리 결혼합니다 · 모바일 청첩장",
-  description: "소중한 분들을 초대합니다.",
+  title: "채종현 · 최수빈 결혼합니다",
+  description: "2026년 11월 15일 일요일 오후 2시 · 테라리움 서울",
+  openGraph: {
+    title: "채종현 · 최수빈 결혼합니다",
+    description: "2026년 11월 15일 일요일 오후 2시 · 테라리움 서울",
+    type: "website",
+    locale: "ko_KR",
+    siteName: "모바일 청첩장",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "채종현 · 최수빈 결혼합니다",
+    description: "2026년 11월 15일 일요일 오후 2시 · 테라리움 서울",
+  },
+  robots: { index: false, follow: false },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  themeColor: "#f7eee6",
 };
 
 export default function RootLayout({
