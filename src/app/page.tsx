@@ -27,6 +27,8 @@ const data = {
     parking: "건물 주차장 700대 · 무료 2시간",
     parkingExtra: "본 건물 만차 시 인근 대진고등학교 주차장(도보 5분)",
     phone: "02-6316-7700",
+    lat: 37.6394920,
+    lng: 127.0733210,
   },
   greeting: `서로의 계절을 함께 걸으며\n같은 풍경을 바라보게 되었습니다.\n\n작은 시작 위에\n귀한 발걸음 더해 주시면\n오래도록 따뜻한 기억으로 간직하겠습니다.`,
   gallery: Array.from({ length: 9 }, (_, i) => `https://picsum.photos/seed/mng${i}/800/1000`),
@@ -325,82 +327,102 @@ function Gallery() {
   );
 }
 
+function NaverMap({ lat, lng, name }: { lat: number; lng: number; name: string }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const clientId = process.env.NEXT_PUBLIC_NAVER_MAP_CLIENT_ID;
+    if (!clientId) {
+      setStatus("error");
+      return;
+    }
+
+    let cancelled = false;
+    const init = () => {
+      if (cancelled || !containerRef.current) return;
+      const w = window as unknown as { naver?: { maps?: Record<string, unknown> } };
+      const nmaps = w.naver?.maps as {
+        LatLng: new (lat: number, lng: number) => unknown;
+        Map: new (el: HTMLElement, opts: Record<string, unknown>) => { setCenter(p: unknown): void };
+        Marker: new (opts: Record<string, unknown>) => unknown;
+        Position?: { TOP_RIGHT: unknown };
+      } | undefined;
+      if (!nmaps) {
+        setStatus("error");
+        return;
+      }
+      const pos = new nmaps.LatLng(lat, lng);
+      const map = new nmaps.Map(containerRef.current, {
+        center: pos,
+        zoom: 16,
+        scaleControl: false,
+        mapDataControl: false,
+        logoControlOptions: { position: nmaps.Position?.TOP_RIGHT },
+      });
+      new nmaps.Marker({ position: pos, map, title: name });
+      setStatus("ready");
+    };
+
+    const existing = document.querySelector<HTMLScriptElement>(
+      'script[data-naver-maps="true"]',
+    );
+    if (existing) {
+      const w = window as unknown as { naver?: { maps?: unknown } };
+      if (w.naver?.maps) init();
+      else existing.addEventListener("load", init, { once: true });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const script = document.createElement("script");
+    script.src = `https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=${clientId}`;
+    script.async = true;
+    script.dataset.naverMaps = "true";
+    script.addEventListener("load", init, { once: true });
+    script.addEventListener("error", () => setStatus("error"), { once: true });
+    document.head.appendChild(script);
+    return () => {
+      cancelled = true;
+    };
+  }, [lat, lng, name]);
+
+  return (
+    <div className="relative h-56 w-full overflow-hidden rounded-2xl bg-[#f0f4f1]">
+      <div ref={containerRef} className="absolute inset-0 h-full w-full" />
+      {status !== "ready" && (
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-[12px] text-[color:var(--color-mute)]">
+          {status === "error" ? "지도 불러오기 실패" : "지도 불러오는 중…"}
+        </div>
+      )}
+      <div className="pointer-events-none absolute left-3 top-3 inline-flex items-center gap-1.5 rounded-full bg-white/95 px-3 py-1.5 shadow-sm">
+        <span className="inline-block h-2 w-2 rounded-full bg-[#03C75A]" />
+        <span className="whitespace-nowrap text-[11px] font-semibold tracking-wider text-[color:var(--color-charcoal)]">NAVER MAP</span>
+      </div>
+    </div>
+  );
+}
+
 function Location() {
   const copyAddress = () => {
     navigator.clipboard?.writeText(data.venue.address);
   };
   const naverMapUrl =
-    "https://map.naver.com/p/search/%ED%85%8C%EB%9D%BC%EB%A6%AC%EC%9B%80%20%EC%84%9C%EC%9A%B8/place/1618264201?c=15.00,0,0,0,dh&placePath=/home?bk_query=%ED%85%8C%EB%9D%BC%EB%A6%AC%EC%9B%80%20%EC%84%9C%EC%9A%B8&entry=bmp&from=map&fromPanelNum=2&locale=ko&svcName=map_pcv5&searchText=%ED%85%8C%EB%9D%BC%EB%A6%AC%EC%9B%80%20%EC%84%9C%EC%9A%B8";
+    "https://map.naver.com/p/search/%ED%85%8C%EB%9D%BC%EB%A6%AC%EC%9B%80%20%EC%84%9C%EC%9A%B8/place/1618264201";
   return (
     <section className="px-5 py-10 bg-white">
       <Card>
         <SectionHead kicker="Location" title="오시는 길" />
+        <NaverMap lat={data.venue.lat} lng={data.venue.lng} name={data.venue.name} />
         <a
           href={naverMapUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="group block overflow-hidden rounded-2xl"
+          className="mt-3 block text-center text-[12px] tracking-wider text-[color:var(--color-rose-deep)] underline underline-offset-4"
         >
-          <div
-            className="relative h-56 w-full"
-            style={{
-              background:
-                "linear-gradient(135deg, #f0f7f0 0%, #e3efe0 40%, #eef2f6 100%)",
-            }}
-          >
-            <svg
-              className="absolute inset-0 h-full w-full"
-              viewBox="0 0 600 224"
-              preserveAspectRatio="xMidYMid slice"
-              aria-hidden="true"
-            >
-              <g stroke="#d7e2d4" strokeWidth="1.2" fill="none" opacity="0.8">
-                <path d="M0 56 L600 56" />
-                <path d="M0 112 L600 112" />
-                <path d="M0 168 L600 168" />
-                <path d="M120 0 L120 224" />
-                <path d="M260 0 L260 224" />
-                <path d="M400 0 L400 224" />
-                <path d="M520 0 L520 224" />
-              </g>
-              <path
-                d="M0 140 Q120 128 260 148 T520 132 T600 138"
-                stroke="#c6d6cc"
-                strokeWidth="14"
-                fill="none"
-                opacity="0.55"
-              />
-              <path
-                d="M70 0 L140 110 L80 224"
-                stroke="#e6d8c9"
-                strokeWidth="10"
-                fill="none"
-                opacity="0.6"
-              />
-              <circle cx="300" cy="112" r="60" fill="#ffffff" opacity="0.4" />
-            </svg>
-            <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-full">
-              <svg width="46" height="60" viewBox="0 0 46 60" aria-hidden="true">
-                <path
-                  d="M23 2 C11 2 2 11 2 23 C2 37 19 54 23 58 C27 54 44 37 44 23 C44 11 35 2 23 2 Z"
-                  fill="#03C75A"
-                  stroke="#ffffff"
-                  strokeWidth="2"
-                />
-                <circle cx="23" cy="22" r="7" fill="#ffffff" />
-              </svg>
-            </div>
-            <div className="pointer-events-none absolute left-3 top-3 inline-flex items-center gap-1.5 rounded-full bg-white/95 px-3 py-1.5 shadow-sm">
-              <span className="inline-block h-2 w-2 rounded-full bg-[#03C75A]" />
-              <span className="text-[11px] font-semibold tracking-wider text-[color:var(--color-charcoal)] whitespace-nowrap">NAVER MAP</span>
-            </div>
-            <div className="pointer-events-none absolute left-1/2 top-[62%] -translate-x-1/2 whitespace-nowrap rounded-md bg-white/95 px-3 py-1 text-[11px] font-medium tracking-wide text-[color:var(--color-charcoal)] shadow-sm">
-              {data.venue.name}
-            </div>
-            <div className="pointer-events-none absolute bottom-3 right-3 rounded-full bg-[color:var(--color-rose-deep)] px-3 py-1.5 text-[11px] tracking-wider text-white whitespace-nowrap transition group-hover:bg-[color:var(--color-charcoal)]">
-              네이버 지도 열기 →
-            </div>
-          </div>
+          네이버 지도에서 길찾기 →
         </a>
         <div className="mt-5 text-center">
           <p className="text-[clamp(1.05rem,4.6vw,1.35rem)] tracking-wide text-[color:var(--color-charcoal)]">{data.venue.name}</p>
