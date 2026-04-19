@@ -15,7 +15,7 @@
 | PRD 명세 | 실제 적용 | 사유 |
 |---|---|---|
 | Phaser 3 + TS + **Vite** | Phaser 3 + TS + **Next.js 16 (기존 프로젝트)** | 기존 청첩장이 Next.js 16. Phaser는 `dynamic(() => import(), { ssr: false })`로 클라이언트 전용 로딩 |
-| Firebase Firestore | 동일 | 서버리스 리더보드 |
+| ~~Firebase Firestore~~ | **Supabase (Postgres + RLS)** | 마스터 지시 (2026-04-19 16:21) — 기존 `ga-docu-sign` 등 Supabase 경험 활용. RLS로 점수 insert 허용 / 연락처 select는 service_role만 |
 | ~~html2canvas + Kakao JS SDK~~ | **html2canvas + Web Share API / 이미지 저장 폴백** | 마스터 지시: Kakao 앱 등록 생략 (가볍게). 게임 시작 전 사용자 정보 입력으로 대체 |
 | Vercel 배포 | 동일 (기존 프로젝트 재배포) | URL 유지 |
 
@@ -31,7 +31,7 @@
 | 담당 | 역할 |
 |---|---|
 | **츄릭핑 형** | 기획 보강 / UX 카피 / 마스터 보고 / 교차 검수 |
-| **막내핑** | 코드 구현 / 로컬 검증 / Vercel 배포 / Firebase·Kakao 키 관리 |
+| **막내핑** | 코드 구현 / 로컬 검증 / Vercel 배포 / Supabase 키 관리 |
 | **그림핑** | 도트 스프라이트 에셋 제작 (2단계, 우선 CC0/플레이스홀더로 시작) |
 
 ## 3. 단계별 체크리스트 (MVP 우선)
@@ -40,12 +40,16 @@
 - [x] WORK_PLAN.md 작성 (이 파일)
 - [x] **의존성 버전 조사 완료** (2026-04-19)
   - 현재: Next.js `16.2.4` · React `19.2.4` · Node `v24.4.1` · npm `11.4.2`
-  - 추가 예정: `phaser@4.0.0` · `html2canvas@1.4.1` · `firebase@12.12.0` · `uuid@13.0.0`
+  - 추가 예정: `phaser@4.0.0` · `html2canvas@1.4.1` · `@supabase/supabase-js@2.x` · `uuid@13.0.0`
+  - ~~Firebase~~: ❌ 제거 (마스터 지시 2026-04-19 16:21 — Supabase 대안 채택)
   - Kakao SDK: ❌ 제거 (마스터 결정 — 앱 등록 생략, `navigator.share` + 이미지 저장 폴백)
-- [ ] 의존성 설치 (`npm i phaser html2canvas firebase uuid @types/uuid`)
+- [ ] 의존성 설치 (`npm i phaser html2canvas @supabase/supabase-js uuid @types/uuid`)
 - [ ] `src/components/wedding-runner/` 디렉터리 생성
 - [ ] Next.js dynamic import로 Phaser 게임 컨테이너 컴포넌트 작성 (`ssr: false`)
 - [ ] `src/lib/wedding-constants.ts` — 결혼식 날짜 · 경품 공용 상수화 (L1206 하드코딩 제거)
+- [ ] `src/lib/supabase.ts` — 브라우저/서버 클라이언트 분리 (anon / service_role)
+- [ ] `.env.local` — `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY`
+- [ ] `supabase/migrations/001_wedding_runner.sql` — 스코어 테이블 + RLS 정책
 
 ### Step 1 — MVP 본게임 (60초 횡스크롤 러너) — 막내핑
 - [ ] Phaser Scale Manager 모바일 세로 (480×854 기준) — 게임 뷰는 가로 배치
@@ -61,14 +65,16 @@
 - [ ] **포켓몬 스타일 픽셀아트 렌더**: Phaser `pixelArt: true` + 정수 스케일링 + 4색 팔레트 풍 필터
 
 ### Step 2 — 리더보드 + 결과 공유 — 막내핑
-- [ ] Firebase 프로젝트 생성 + Firestore 룰 설정
-- [ ] **게임 시작 전 사용자 정보 입력 폼** (닉네임 + 연락처 or 좌석 정보 — 경품 연락용)
-- [ ] localStorage UUID + 닉네임
-- [ ] 점수 Upsert (최고점만 갱신) + 메타데이터 검증치 동봉
-- [ ] 리더보드 씬 (TOP 10 + 본인 순위)
+- [ ] Supabase 프로젝트 확정 (기존 `ga-docu-sign` 재사용 vs 신규 `wedding-runner-2026` — 마스터 컨펌 대기)
+- [ ] 마이그레이션 적용 (`wedding_runner_scores` 테이블 + RLS 정책)
+- [ ] **게임 시작 전 사용자 정보 입력 폼** (이름 + 연락처 — 마스터 확정 2026-04-19 16:20)
+- [ ] 연락처 해시 저장 (SHA-256 + salt, 평문 미저장) — 당첨자만 마스터가 service_role로 조회 후 육성 연락
+- [ ] localStorage UUID + 닉네임 + 연락처 해시 캐시
+- [ ] API Route `POST /api/scores/submit` (최고점만 Upsert, 서버측 치팅 검증)
+- [ ] API Route `GET /api/scores/top` (TOP 10 + 본인 순위)
+- [ ] 리더보드 씬 (TOP 10 + 본인 순위) — Realtime 구독은 옵션 (부하 고려해 폴링 15초 우선)
 - [ ] 결과 카드 HTML/CSS (도감 스타일)
 - [ ] html2canvas 캡처 → **Web Share API (navigator.share)** + "이미지 저장" 폴백
-- [ ] Kakao SDK 제거 (앱 등록 불필요)
 
 ### Step 3 — 진화 엔딩 + 오프닝 (임팩트) — 막내핑 + 그림핑
 - [ ] 60초 완주 진화 연출 (흰 실루엣 플래시)
@@ -100,8 +106,10 @@
   - 🥉 **3등**: 치킨 기프티콘 1개
 - [x] **Kakao 앱 등록**: ❌ **생략** (가볍게 가기) → 게임 시작 전 사용자 정보 입력으로 대체 + Web Share API 공유
 - [x] **게임 비주얼/방식**: 포켓몬스터 스타일 도트 + **횡스크롤 러너**
-- [ ] **Firebase 프로젝트**: 신규 생성 OK 여부 (이름 제안: `wedding-runner-2026`)
-- [ ] **사용자 정보 입력 필드** 확정 (닉네임 + 좌석번호? 휴대폰 뒷4자리? — 경품 연락용)
+- [x] **백엔드**: ~~Firebase~~ → **Supabase** (마스터 지시 2026-04-19 16:21)
+- [x] **사용자 정보 입력 필드**: **이름 + 연락처** (마스터 확정 2026-04-19 16:20)
+- [ ] **Supabase 프로젝트**: 기존 `ga-docu-sign` 재사용 vs 신규 `wedding-runner-2026` 신설 — 마스터 최종 선택 대기
+- [ ] **연락처 저장 방식**: SHA-256 해시 저장 (당첨자만 문자로 본인 확인) 방향 OK 여부
 - [ ] **닉네임 정책** 욕설 필터 적용 여부
 
 ## 7. 기획안 (츄릭핑 작성 영역)
@@ -133,3 +141,5 @@ _(작성 대기 중 — 7번 채워지면 시작)_
 - 2026-04-19 16:06 — WORK_PLAN.md 초안 작성 (막내핑)
 - 2026-04-19 16:0X — `docs/prd-wedding-runner.md` PRD 원문 보관 + 기존 게임 코드 위치 확정 (라인 617~1191)
 - 2026-04-19 16:11 — 마스터 확정: Kakao 생략 / 집계 마감 결혼 당일 / 경품 TOP3 확정 / 게임 방향 **포켓몬 도트 + 횡스크롤 러너**로 전환
+- 2026-04-19 16:20 — 마스터 확정: 입력 필드 = **이름 + 연락처**
+- 2026-04-19 16:21 — 마스터 지시: 백엔드 Firebase → **Supabase 대안 검토** → 츄릭핑+막내핑 Supabase 채택 합의
