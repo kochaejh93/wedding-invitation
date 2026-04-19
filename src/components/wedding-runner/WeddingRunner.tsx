@@ -344,7 +344,7 @@ export default function WeddingRunner({ onComplete }: { onComplete: () => void }
       <div className="relative">
         <PhaserGame onResult={handleResult} playerType={playerType} />
         <p className="mt-3 text-center text-[11px] tracking-widest text-[color:var(--color-mute)]">
-          화면 위쪽 탭 = 점프 · 아래쪽 탭 = 슬라이드
+          화면 탭 또는 Space/↑ = 점프
         </p>
       </div>
     );

@@ -69,10 +69,7 @@ type RunnerState = {
   elapsed: number;
   velocityY: number;
   isJumping: boolean;
-  sliding: boolean;
-  slideUntil: number;
   invincibleUntil: number;
-  confusedUntil: number;
   // 신부 한정 — 피격/아이템 획득 시 일시적 표정 변경 타이머
   hurtUntil: number;
   happyUntil: number;
@@ -84,7 +81,6 @@ type RunnerState = {
 
 const GRAVITY = 2200;
 const JUMP_V = -760;
-const SLIDE_DURATION = 500;
 
 // 아이템/장애물 내부 키 → 실제 에셋 파일
 const ITEM_TEXTURE: Record<ItemKind, string> = {
@@ -159,10 +155,7 @@ export default function PhaserGame({
         elapsed: 0,
         velocityY: 0,
         isJumping: false,
-        sliding: false,
-        slideUntil: 0,
         invincibleUntil: 0,
-        confusedUntil: 0,
         hurtUntil: 0,
         happyUntil: 0,
         scrollSpeed: 260,
@@ -247,19 +240,9 @@ export default function PhaserGame({
       }
 
       function tryJump() {
-        if (state.isJumping || state.sliding) return;
+        if (state.isJumping) return;
         state.velocityY = JUMP_V;
         state.isJumping = true;
-      }
-
-      function trySlide(scene: Phaser.Scene) {
-        if (state.isJumping || state.sliding) return;
-        state.sliding = true;
-        state.slideUntil = scene.time.now + SLIDE_DURATION;
-        state.playerH = 30;
-        const slideH = 38;
-        state.player!.setDisplaySize(56, slideH);
-        state.player!.y = GROUND_Y - slideH / 2;
       }
 
       function spawnItem(scene: Phaser.Scene) {
@@ -393,20 +376,12 @@ export default function PhaserGame({
           state.hudCombo = scene.add.text(16, 40, "", hudStyle);
           state.hudStatus = scene.add.text(VIEW_W / 2, 40, "", { ...hudStyle, fontSize: "14px", color: "#c85476" }).setOrigin(0.5, 0);
 
-          scene.input.on("pointerdown", (p: Phaser.Input.Pointer) => {
+          scene.input.on("pointerdown", () => {
             if (state.finished) return;
-            const inverted = scene.time.now < (state.confusedUntil ?? 0);
-            if (p.y > VIEW_H * 0.7) {
-              if (inverted) tryJump();
-              else trySlide(scene);
-            } else {
-              if (inverted) trySlide(scene);
-              else tryJump();
-            }
+            tryJump();
           });
           scene.input.keyboard?.on("keydown-SPACE", () => tryJump());
           scene.input.keyboard?.on("keydown-UP", () => tryJump());
-          scene.input.keyboard?.on("keydown-DOWN", () => trySlide(scene));
         },
         update(this: Phaser.Scene, _t: number, dt: number) {
           const scene = this;
@@ -441,12 +416,7 @@ export default function PhaserGame({
               state.player!.setTexture("bride-jump");
               state.player!.setDisplaySize(state.playerW!, state.playerH!);
             }
-          } else if (state.sliding && scene.time.now > state.slideUntil!) {
-            state.sliding = false;
-            state.playerH = baseH;
-            state.player!.setDisplaySize(56, baseH);
-            state.player!.y = baseY;
-          } else if (!state.sliding) {
+          } else {
             if (playerType === "bride") {
               // 신부: 피격/행복 우선, 그외 달리기 2프레임 교차 (120ms)
               const now = scene.time.now;
@@ -472,9 +442,7 @@ export default function PhaserGame({
             state.player!.alpha = 1;
           }
 
-          if (scene.time.now < (state.confusedUntil ?? 0)) {
-            state.hudStatus!.setText("혼란! 입력이 반전됩니다");
-          } else if (scene.time.now < (state.invincibleUntil ?? 0)) {
+          if (scene.time.now < (state.invincibleUntil ?? 0)) {
             state.hudStatus!.setText("무적!");
           } else {
             state.hudStatus!.setText("");
@@ -491,8 +459,8 @@ export default function PhaserGame({
             state.nextObstacleAt = state.elapsed + gap + Math.random() * 350;
           }
 
-          // hit box는 시각 크기보다 살짝 작게 — 캐릭터 폭 56→40, 슬라이드 시 30
-          const hitH = state.sliding ? 30 : 70;
+          // hit box는 시각 크기보다 살짝 작게 — 캐릭터 폭 56→40
+          const hitH = 70;
           const hitW = 40;
           for (const it of state.itemsPool!) {
             if (!it.alive) continue;
@@ -553,7 +521,6 @@ export default function PhaserGame({
                 if (invincible) continue;
                 state.scoreValue! -= OBSTACLE_PENALTY.flower;
                 state.combo = 0;
-                state.confusedUntil = scene.time.now + 2000;
                 state.hurtUntil = scene.time.now + 700;
               }
             }
