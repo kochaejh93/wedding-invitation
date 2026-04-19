@@ -198,16 +198,55 @@ export default function PhaserGame({
       function finish(this: Phaser.Scene, completed: boolean) {
         if (state.finished) return;
         state.finished = true;
-        if (!resultCalled.current) {
-          resultCalled.current = true;
-          onResultRef.current({
-            score: Math.max(0, Math.floor(state.scoreValue ?? 0)),
-            itemScore: Math.floor(state.itemScoreValue ?? 0),
-            maxCombo: state.maxCombo ?? 0,
-            survivalTime: Math.min(GAME_DURATION_SEC, Math.floor(state.survivalTime ?? 0)),
-            completed,
-          });
+        const scene = this;
+
+        const callResult = () => {
+          if (!resultCalled.current) {
+            resultCalled.current = true;
+            onResultRef.current({
+              score: Math.max(0, Math.floor(state.scoreValue ?? 0)),
+              itemScore: Math.floor(state.itemScoreValue ?? 0),
+              maxCombo: state.maxCombo ?? 0,
+              survivalTime: Math.min(GAME_DURATION_SEC, Math.floor(state.survivalTime ?? 0)),
+              completed,
+            });
+          }
+        };
+
+        // 게임오버(케이크 충돌) 시: 캐릭터 창 안에서 오버레이 이미지 + 한글 텍스트 노출 후 결과로 전환
+        if (!completed && scene.textures.exists("game-over")) {
+          const dim = scene.add.rectangle(VIEW_W / 2, VIEW_H / 2, VIEW_W, VIEW_H, 0x000000, 0.55);
+          dim.setDepth(100);
+
+          const img = scene.add.image(VIEW_W / 2, VIEW_H / 2 - 40, "game-over");
+          img.setDepth(101);
+          const maxW = VIEW_W - 60;
+          const maxH = VIEW_H * 0.55;
+          const fit = Math.min(maxW / img.width, maxH / img.height, 1);
+          img.setScale(fit);
+
+          scene.add.text(VIEW_W / 2, VIEW_H - 150, "게임 오버", {
+            fontFamily: "'Apple SD Gothic Neo', 'Noto Sans KR', 'Pretendard', sans-serif",
+            fontSize: "44px",
+            color: "#ffffff",
+            fontStyle: "bold",
+            stroke: "#3a2430",
+            strokeThickness: 6,
+          }).setOrigin(0.5).setDepth(101);
+
+          scene.add.text(VIEW_W / 2, VIEW_H - 96, "캐릭터가 쓰러졌습니다…", {
+            fontFamily: "'Apple SD Gothic Neo', 'Noto Sans KR', 'Pretendard', sans-serif",
+            fontSize: "18px",
+            color: "#fdf2f4",
+            stroke: "#3a2430",
+            strokeThickness: 3,
+          }).setOrigin(0.5).setDepth(101);
+
+          scene.time.delayedCall(1800, callResult);
+          return;
         }
+
+        callResult();
       }
 
       function tryJump() {
@@ -253,10 +292,15 @@ export default function PhaserGame({
       }
 
       const sceneConfig: Phaser.Types.Scenes.SettingsConfig & {
+        preload: (this: Phaser.Scene) => void;
         create: (this: Phaser.Scene) => void;
         update: (this: Phaser.Scene, t: number, dt: number) => void;
       } = {
         key: "main",
+        preload(this: Phaser.Scene) {
+          // 게임오버 씬에 띄울 오리지널 일러스트 (웨딩 16비트 CC0)
+          this.load.image("game-over", "/wedding-runner/game-over.png");
+        },
         create(this: Phaser.Scene) {
           const scene = this;
           scene.add.rectangle(VIEW_W / 2, VIEW_H / 2, VIEW_W, VIEW_H, PALETTE.sky);
