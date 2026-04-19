@@ -38,9 +38,14 @@
 
 ### Step 0 — 셋업 ✅ 막내핑
 - [x] WORK_PLAN.md 작성 (이 파일)
-- [ ] Phaser 3 / html2canvas / firebase / kakao SDK 의존성 추가
+- [x] **의존성 버전 조사 완료** (2026-04-19)
+  - 현재: Next.js `16.2.4` · React `19.2.4` · Node `v24.4.1` · npm `11.4.2`
+  - 추가 예정: `phaser@4.0.0` · `html2canvas@1.4.1` · `firebase@12.12.0` · `uuid@13.0.0`
+  - Kakao SDK: ❌ 제거 (마스터 결정 — 앱 등록 생략, `navigator.share` + 이미지 저장 폴백)
+- [ ] 의존성 설치 (`npm i phaser html2canvas firebase uuid @types/uuid`)
 - [ ] `src/components/wedding-runner/` 디렉터리 생성
-- [ ] Next.js dynamic import로 Phaser 게임 컨테이너 컴포넌트 작성
+- [ ] Next.js dynamic import로 Phaser 게임 컨테이너 컴포넌트 작성 (`ssr: false`)
+- [ ] `src/lib/wedding-constants.ts` — 결혼식 날짜 · 경품 공용 상수화 (L1206 하드코딩 제거)
 
 ### Step 1 — MVP 본게임 (60초 횡스크롤 러너) — 막내핑
 - [ ] Phaser Scale Manager 모바일 세로 (480×854 기준) — 게임 뷰는 가로 배치
