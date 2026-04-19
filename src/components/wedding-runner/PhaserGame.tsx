@@ -393,9 +393,11 @@ export default function PhaserGame({
           state.elapsed = (state.elapsed ?? 0) + dt;
           state.survivalTime = state.elapsed / 1000;
 
-          if (state.survivalTime < 15) state.scrollSpeed = 240;
-          else if (state.survivalTime < 40) state.scrollSpeed = 290;
-          else state.scrollSpeed = 360;
+          // 10초마다 속도 스텝업 — 기본 240에서 시작해 10초 간격으로 12%씩 가속, 상한 520
+          // 0s:240 · 10s:269 · 20s:301 · 30s:337 · 40s:378 · 50s:423 · 60s:474 · 70s+:520
+          const baseSpeed = 240;
+          const stepIdx = Math.floor(state.survivalTime / 10);
+          state.scrollSpeed = Math.min(520, baseSpeed * Math.pow(1.12, stepIdx));
 
           const speed = state.scrollSpeed!;
           // 배경 tileSprite 좌측으로 흐름 (메인 스크롤)

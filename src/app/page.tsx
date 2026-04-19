@@ -529,6 +529,20 @@ function Guestbook() {
     { name: "친구 J", msg: "두 분의 새로운 시작을 진심으로 축하합니다. 늘 따스한 봄날 같은 결혼 생활 보내세요.", ts: Date.now() - 86400000 },
   ]);
   const [open, setOpen] = useState(false);
+
+  // 모달 열릴 때 body 스크롤 잠금 + ESC 닫기 — 모바일에서 모달 뒤 배경이 같이 스크롤되며 "프리징"처럼 느껴지던 증상 해결
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = prev;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
   const submit = () => {
     if (!name.trim() || !msg.trim()) return;
     setList((l) => [{ name: name.trim(), msg: msg.trim(), ts: Date.now() }, ...l]);
@@ -569,6 +583,7 @@ function Guestbook() {
         </div>
 
         <button
+          type="button"
           onClick={() => setOpen(true)}
           className="mt-7 mx-auto block rounded-full border border-[color:var(--color-rose)]/40 px-6 py-2.5 text-[12px] tracking-[0.22em] text-[color:var(--color-rose-deep)] whitespace-nowrap"
         >
@@ -576,8 +591,16 @@ function Guestbook() {
         </button>
 
         {open && (
-          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 px-4 pb-6 sm:pb-0">
-            <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+          <div
+            role="dialog"
+            aria-modal="true"
+            onClick={() => setOpen(false)}
+            className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-black/40 px-4 pb-6 sm:pb-0"
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"
+            >
               <p className="eyebrow text-center">Leave a Note</p>
               <h3 className="mt-2 mb-5 text-center text-lg text-[color:var(--color-charcoal)]">축하 메시지</h3>
               <input
@@ -595,12 +618,14 @@ function Guestbook() {
               />
               <div className="mt-6 grid grid-cols-2 gap-2">
                 <button
+                  type="button"
                   onClick={() => setOpen(false)}
                   className="py-3 rounded-xl border border-[color:var(--color-line)] text-[13px] tracking-widest text-[color:var(--color-mute)]"
                 >
                   취소
                 </button>
                 <button
+                  type="button"
                   onClick={submit}
                   className="py-3 rounded-xl bg-[color:var(--color-rose-deep)] text-white text-[13px] tracking-widest"
                 >
