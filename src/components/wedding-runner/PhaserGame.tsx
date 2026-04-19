@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 import type Phaser from "phaser";
 import { GAME_DURATION_SEC } from "@/lib/wedding-constants";
 
-// 외부 IP·스프라이트 없이 Graphics/Rectangle 으로 도트 풍을 연출
+// 스테이지 배경 · 캐릭터 · 아이템/장애물은 모두 마스터 제공 오리지널 도트 에셋 사용
 // (포켓몬 IP 사용 금지 원칙 — CC0/오리지널만)
 
 export type GameResult = {
@@ -23,13 +23,6 @@ const PALETTE = {
   ink: 0x3a2430,
   groom: 0x3a2430,
   bride: 0xc85476,
-  heart: 0xe25c7f,
-  ring: 0xf7c95c,
-  bouquet: 0xe8a0b5,
-  champagne: 0xffe27a,
-  glass: 0xb5dbe8,
-  flower: 0xd65a8a,
-  cake: 0xffffff,
 };
 
 const VIEW_W = 480;
@@ -58,8 +51,8 @@ type RunnerState = {
   playerW: number;
   playerH: number;
   bg: Phaser.GameObjects.TileSprite;
-  itemsPool: Array<{ rect: Phaser.GameObjects.Graphics; kind: ItemKind; x: number; y: number; alive: boolean; size: number }>;
-  obstaclesPool: Array<{ rect: Phaser.GameObjects.Graphics; kind: ObstacleKind; x: number; y: number; alive: boolean; w: number; h: number }>;
+  itemsPool: Array<{ sprite: Phaser.GameObjects.Image; kind: ItemKind; x: number; y: number; alive: boolean; w: number; h: number }>;
+  obstaclesPool: Array<{ sprite: Phaser.GameObjects.Image; kind: ObstacleKind; x: number; y: number; alive: boolean; w: number; h: number }>;
   groundTiles: Phaser.GameObjects.Rectangle[];
   parallaxLayers: Phaser.GameObjects.Rectangle[][];
   hudScore: Phaser.GameObjects.Text;
@@ -88,62 +81,31 @@ const GRAVITY = 2200;
 const JUMP_V = -760;
 const SLIDE_DURATION = 500;
 
-function drawItem(g: Phaser.GameObjects.Graphics, kind: ItemKind, size: number) {
-  g.clear();
-  const c =
-    kind === "heart" ? PALETTE.heart :
-    kind === "ring" ? PALETTE.ring :
-    kind === "bouquet" ? PALETTE.bouquet :
-    PALETTE.champagne;
-  g.fillStyle(c, 1);
-  if (kind === "ring") {
-    g.lineStyle(4, c, 1);
-    g.strokeCircle(0, 0, size);
-    g.lineStyle(2, PALETTE.ink, 1);
-    g.strokeCircle(0, 0, size);
-  } else if (kind === "heart") {
-    g.fillRect(-size / 2, -size / 2, size, size);
-    g.fillRect(-size, -size / 2, size / 2, size / 2);
-    g.fillRect(size / 2, -size / 2, size / 2, size / 2);
-    g.lineStyle(2, PALETTE.ink, 1);
-    g.strokeRect(-size / 2, -size / 2, size, size);
-  } else if (kind === "bouquet") {
-    g.fillCircle(0, -4, size * 0.8);
-    g.fillStyle(0x4a8b5e, 1);
-    g.fillRect(-2, 0, 4, size);
-    g.lineStyle(2, PALETTE.ink, 1);
-    g.strokeCircle(0, -4, size * 0.8);
-  } else {
-    g.fillRect(-size / 3, -size, (size / 3) * 2, size * 2);
-    g.fillStyle(PALETTE.ink, 1);
-    g.fillRect(-size / 4, -size - 6, size / 2, 6);
-  }
-}
+// 아이템/장애물 내부 키 → 실제 에셋 파일
+const ITEM_TEXTURE: Record<ItemKind, string> = {
+  heart: "spr-heart",
+  ring: "spr-ring",
+  bouquet: "spr-bouquet",
+  champagne: "spr-champagne",
+};
+const OBSTACLE_TEXTURE: Record<ObstacleKind, string> = {
+  glass: "spr-puddle",
+  flower: "spr-chair",
+  cake: "spr-cake",
+};
 
-function drawObstacle(g: Phaser.GameObjects.Graphics, kind: ObstacleKind, w: number, h: number) {
-  g.clear();
-  if (kind === "glass") {
-    g.fillStyle(PALETTE.glass, 1);
-    g.fillTriangle(-w / 2, -h / 2, w / 2, -h / 2, 0, h / 2);
-    g.lineStyle(2, PALETTE.ink, 1);
-    g.strokeTriangle(-w / 2, -h / 2, w / 2, -h / 2, 0, h / 2);
-  } else if (kind === "flower") {
-    g.fillStyle(PALETTE.flower, 1);
-    g.fillRect(-w / 2, -h / 2, w, h);
-    g.lineStyle(2, PALETTE.ink, 1);
-    g.strokeRect(-w / 2, -h / 2, w, h);
-    g.fillStyle(PALETTE.ink, 1);
-    g.fillRect(-8, -h / 2 + 10, 4, 4);
-    g.fillRect(4, -h / 2 + 10, 4, 4);
-  } else {
-    g.fillStyle(PALETTE.cake, 1);
-    g.fillRect(-w / 2, -h / 2, w, h);
-    g.fillStyle(PALETTE.bride, 1);
-    g.fillRect(-w / 2, -h / 2, w, 10);
-    g.lineStyle(2, PALETTE.ink, 1);
-    g.strokeRect(-w / 2, -h / 2, w, h);
-  }
-}
+// 월드 기준 표시 높이 (px). 너비는 원본 비율 유지
+const ITEM_HEIGHT: Record<ItemKind, number> = {
+  heart: 40,
+  ring: 40,
+  bouquet: 52,
+  champagne: 48,
+};
+const OBSTACLE_HEIGHT: Record<ObstacleKind, number> = {
+  glass: 36,
+  flower: 54,
+  cake: 56,
+};
 
 function intersects(
   ax: number, ay: number, aw: number, ah: number,
@@ -273,27 +235,27 @@ export default function PhaserGame({
         const kinds: ItemKind[] = ["heart", "heart", "heart", "ring", "bouquet", "champagne"];
         const kind = kinds[Math.floor(Math.random() * kinds.length)];
         const aerial = kind === "heart" || kind === "ring" || Math.random() < 0.4;
-        const y = aerial ? GROUND_Y - 90 - Math.random() * 80 : GROUND_Y - 20;
-        const size = kind === "bouquet" ? 22 : kind === "champagne" ? 20 : 16;
-        const g = scene.add.graphics();
-        drawItem(g, kind, size);
-        g.x = VIEW_W + 30;
-        g.y = y;
-        state.itemsPool!.push({ rect: g, kind, x: g.x, y: g.y, alive: true, size });
+        const targetH = ITEM_HEIGHT[kind];
+        const y = aerial ? GROUND_Y - 90 - Math.random() * 80 : GROUND_Y - targetH / 2;
+        const img = scene.add.image(VIEW_W + 30, y, ITEM_TEXTURE[kind]);
+        // 세로 기준 맞춤 — 원본 비율 유지
+        const scale = targetH / img.height;
+        img.setScale(scale);
+        const w = img.width * scale;
+        state.itemsPool!.push({ sprite: img, kind, x: img.x, y: img.y, alive: true, w, h: targetH });
       }
 
       function spawnObstacle(scene: Phaser.Scene) {
         const kinds: ObstacleKind[] = ["glass", "glass", "flower", "flower", "cake"];
         const kind = kinds[Math.floor(Math.random() * kinds.length)];
-        let w = 28, h = 36, y = GROUND_Y - 18;
-        if (kind === "flower") { w = 36; h = 48; y = GROUND_Y - 24; }
-        else if (kind === "cake") { w = 40; h = 52; y = GROUND_Y - 26; }
-        else { w = 28; h = 28; y = GROUND_Y - 14; }
-        const g = scene.add.graphics();
-        drawObstacle(g, kind, w, h);
-        g.x = VIEW_W + 30;
-        g.y = y;
-        state.obstaclesPool!.push({ rect: g, kind, x: g.x, y: g.y, alive: true, w, h });
+        const targetH = OBSTACLE_HEIGHT[kind];
+        // 바닥에 딱 붙게 배치
+        const y = GROUND_Y - targetH / 2 + 6;
+        const img = scene.add.image(VIEW_W + 30, y, OBSTACLE_TEXTURE[kind]);
+        const scale = targetH / img.height;
+        img.setScale(scale);
+        const w = img.width * scale;
+        state.obstaclesPool!.push({ sprite: img, kind, x: img.x, y: img.y, alive: true, w, h: targetH });
       }
 
       const sceneConfig: Phaser.Types.Scenes.SettingsConfig & {
@@ -310,6 +272,15 @@ export default function PhaserGame({
           this.load.image("game-over", "/wedding-runner/game-over.png");
           // 스테이지1 배경 (마스터 제공 · 가로 타일링)
           this.load.image("stage1-bg", "/wedding-runner/stage1-bg.png");
+          // 아이템 (점수 부스터)
+          this.load.image("spr-heart", "/wedding-runner/item-heart.png");
+          this.load.image("spr-ring", "/wedding-runner/item-ring.png");
+          this.load.image("spr-bouquet", "/wedding-runner/item-bouquet.png");
+          this.load.image("spr-champagne", "/wedding-runner/item-champagne.png");
+          // 장애물 (웅덩이 = glass 대체, 의자 = flower 대체, 케이크 = 게임오버)
+          this.load.image("spr-puddle", "/wedding-runner/obs-puddle.png");
+          this.load.image("spr-chair", "/wedding-runner/obs-chair.png");
+          this.load.image("spr-cake", "/wedding-runner/item-cake.png");
         },
         create(this: Phaser.Scene) {
           const scene = this;
@@ -453,11 +424,11 @@ export default function PhaserGame({
           for (const it of state.itemsPool!) {
             if (!it.alive) continue;
             it.x -= (speed * dt) / 1000;
-            it.rect.x = it.x;
-            if (it.x < -40) { it.alive = false; it.rect.destroy(); continue; }
-            if (intersects(PLAYER_X, state.player!.y, hitW, hitH, it.x, it.y, it.size * 2, it.size * 2)) {
+            it.sprite.x = it.x;
+            if (it.x < -60) { it.alive = false; it.sprite.destroy(); continue; }
+            if (intersects(PLAYER_X, state.player!.y, hitW, hitH, it.x, it.y, it.w, it.h)) {
               it.alive = false;
-              it.rect.destroy();
+              it.sprite.destroy();
               const gained = ITEM_SCORE[it.kind];
               state.scoreValue! += gained;
               state.itemScoreValue! += gained;
@@ -472,12 +443,12 @@ export default function PhaserGame({
           for (const ob of state.obstaclesPool!) {
             if (!ob.alive) continue;
             ob.x -= (speed * dt) / 1000;
-            ob.rect.x = ob.x;
-            if (ob.x < -50) { ob.alive = false; ob.rect.destroy(); continue; }
+            ob.sprite.x = ob.x;
+            if (ob.x < -80) { ob.alive = false; ob.sprite.destroy(); continue; }
             const hit = intersects(PLAYER_X, state.player!.y, hitW, hitH, ob.x, ob.y, ob.w, ob.h);
             if (hit) {
               ob.alive = false;
-              ob.rect.destroy();
+              ob.sprite.destroy();
               const invincible = scene.time.now < (state.invincibleUntil ?? 0);
               if (ob.kind === "cake") {
                 if (invincible) continue;
