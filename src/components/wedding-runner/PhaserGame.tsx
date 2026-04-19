@@ -30,20 +30,24 @@ const VIEW_H = 720;
 const GROUND_Y = VIEW_H - 120;
 const PLAYER_X = 96;
 
-type ItemKind = "heart" | "ring" | "bouquet" | "champagne";
-type ObstacleKind = "glass" | "flower" | "cake";
+type ItemKind = "heart" | "ring" | "bouquet" | "champagne" | "invitation";
+type ObstacleKind = "glass" | "flower" | "cake" | "bill";
 
 const ITEM_SCORE: Record<ItemKind, number> = {
   heart: 30,
   ring: 100,
   bouquet: 250,
   champagne: 80,
+  // 청첩장 — 최상위 보너스 (희귀 스폰)
+  invitation: 500,
 };
 
 const OBSTACLE_PENALTY: Record<ObstacleKind, number> = {
   glass: 80,
   flower: 150,
   cake: 0,
+  // 축의금 — 날아오는 지폐 (감점 + 콤보 리셋)
+  bill: 120,
 };
 
 type RunnerState = {
@@ -88,11 +92,14 @@ const ITEM_TEXTURE: Record<ItemKind, string> = {
   ring: "spr-ring",
   bouquet: "spr-bouquet",
   champagne: "spr-champagne",
+  invitation: "spr-invitation",
 };
 const OBSTACLE_TEXTURE: Record<ObstacleKind, string> = {
   glass: "spr-puddle",
   flower: "spr-chair",
   cake: "spr-cake",
+  // bill 은 spawn 시점에 single/multi 변형(spr-bill | spr-bills) 랜덤 선택
+  bill: "spr-bill",
 };
 
 // 월드 기준 표시 높이 (px). 너비는 원본 비율 유지
@@ -101,11 +108,13 @@ const ITEM_HEIGHT: Record<ItemKind, number> = {
   ring: 40,
   bouquet: 52,
   champagne: 48,
+  invitation: 56,
 };
 const OBSTACLE_HEIGHT: Record<ObstacleKind, number> = {
   glass: 36,
   flower: 54,
   cake: 56,
+  bill: 44,
 };
 
 function intersects(
@@ -254,9 +263,10 @@ export default function PhaserGame({
       }
 
       function spawnItem(scene: Phaser.Scene) {
-        const kinds: ItemKind[] = ["heart", "heart", "heart", "ring", "bouquet", "champagne"];
+        // invitation 은 희귀 — 풀에 1번만 넣어 약 1/10 확률
+        const kinds: ItemKind[] = ["heart", "heart", "heart", "ring", "bouquet", "champagne", "heart", "ring", "bouquet", "invitation"];
         const kind = kinds[Math.floor(Math.random() * kinds.length)];
-        const aerial = kind === "heart" || kind === "ring" || Math.random() < 0.4;
+        const aerial = kind === "heart" || kind === "ring" || kind === "invitation" || Math.random() < 0.4;
         const targetH = ITEM_HEIGHT[kind];
         const y = aerial ? GROUND_Y - 90 - Math.random() * 80 : GROUND_Y - targetH / 2;
 
@@ -275,13 +285,19 @@ export default function PhaserGame({
       }
 
       function spawnObstacle(scene: Phaser.Scene) {
-        // cake = 즉사 장애물 — 확률 증가 (게임오버 연출 자주 발동)
-        const kinds: ObstacleKind[] = ["glass", "glass", "flower", "cake", "cake"];
+        // cake = 즉사 · bill = 감점 · glass/flower = 기존
+        const kinds: ObstacleKind[] = ["glass", "glass", "flower", "cake", "cake", "bill", "bill"];
         const kind = kinds[Math.floor(Math.random() * kinds.length)];
         const targetH = OBSTACLE_HEIGHT[kind];
-        // 바닥에 딱 붙게 배치
-        const y = GROUND_Y - targetH / 2 + 6;
-        const img = scene.add.image(VIEW_W + 30, y, OBSTACLE_TEXTURE[kind]);
+        // bill 은 공중에서 날아오는 지폐 느낌으로 살짝 띄움, 그외는 바닥 접지
+        const y = kind === "bill"
+          ? GROUND_Y - 80 - Math.random() * 60
+          : GROUND_Y - targetH / 2 + 6;
+        // bill 은 낱장(spr-bill) / 다발(spr-bills) 50:50 랜덤 변형
+        const textureKey = kind === "bill"
+          ? (Math.random() < 0.5 ? "spr-bill" : "spr-bills")
+          : OBSTACLE_TEXTURE[kind];
+        const img = scene.add.image(VIEW_W + 30, y, textureKey);
         const scale = targetH / img.height;
         img.setScale(scale);
         // 장애물은 빨간 tint로 "위험" 시각 신호 — 아이템(원본색)과 구분
@@ -332,10 +348,15 @@ export default function PhaserGame({
           this.load.image("spr-ring", "/wedding-runner/item-ring.png");
           this.load.image("spr-bouquet", "/wedding-runner/item-bouquet.png");
           this.load.image("spr-champagne", "/wedding-runner/item-champagne.png");
+          // 청첩장 — +500 최상위 보너스 아이템
+          this.load.image("spr-invitation", "/wedding-runner/item-invitation.png");
           // 장애물 (웅덩이 = glass 대체, 의자 = flower 대체, 케이크 = 게임오버)
           this.load.image("spr-puddle", "/wedding-runner/obs-puddle.png");
           this.load.image("spr-chair", "/wedding-runner/obs-chair.png");
           this.load.image("spr-cake", "/wedding-runner/item-cake.png");
+          // 축의금(지폐) — 감점 장애물, 낱장/다발 2종 변형
+          this.load.image("spr-bill", "/wedding-runner/obs-bill.png");
+          this.load.image("spr-bills", "/wedding-runner/obs-bills.png");
         },
         create(this: Phaser.Scene) {
           const scene = this;
@@ -522,6 +543,11 @@ export default function PhaserGame({
                 state.scoreValue! -= OBSTACLE_PENALTY.glass;
                 state.combo = 0;
                 // 신부: 피격 시 HURT 포즈 700ms
+                state.hurtUntil = scene.time.now + 700;
+              } else if (ob.kind === "bill") {
+                if (invincible) continue;
+                state.scoreValue! -= OBSTACLE_PENALTY.bill;
+                state.combo = 0;
                 state.hurtUntil = scene.time.now + 700;
               } else {
                 if (invincible) continue;
