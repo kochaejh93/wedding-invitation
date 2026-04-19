@@ -13,7 +13,8 @@ import {
 
 const PhaserGame = dynamic(() => import("./PhaserGame"), { ssr: false });
 
-type Stage = "intro" | "form" | "play" | "result" | "leaderboard";
+type Stage = "intro" | "form" | "character" | "play" | "result" | "leaderboard";
+type PlayerType = "bride" | "groom";
 
 type TopRow = {
   id: string;
@@ -29,6 +30,7 @@ const LS_PLAYER_ID = "wr_player_id";
 const LS_NICKNAME = "wr_nickname";
 const LS_CONTACT = "wr_contact";
 const LS_BEST = "wr_best_score";
+const LS_PLAYER_TYPE = "wr_player_type";
 
 function loadPlayerId(): string {
   if (typeof window === "undefined") return "";
@@ -45,6 +47,7 @@ export default function WeddingRunner({ onComplete }: { onComplete: () => void }
   const [playerId, setPlayerId] = useState<string>("");
   const [nickname, setNickname] = useState("");
   const [contact, setContact] = useState("");
+  const [playerType, setPlayerType] = useState<PlayerType>("groom");
   const [formError, setFormError] = useState<string | null>(null);
   const [result, setResult] = useState<GameResult | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -57,8 +60,10 @@ export default function WeddingRunner({ onComplete }: { onComplete: () => void }
     setPlayerId(loadPlayerId());
     const n = window.localStorage.getItem(LS_NICKNAME) ?? "";
     const c = window.localStorage.getItem(LS_CONTACT) ?? "";
+    const t = window.localStorage.getItem(LS_PLAYER_TYPE) as PlayerType | null;
     if (n) setNickname(n);
     if (c) setContact(c);
+    if (t === "bride" || t === "groom") setPlayerType(t);
   }, []);
 
   const bestLocal = useMemo(() => {
@@ -81,6 +86,12 @@ export default function WeddingRunner({ onComplete }: { onComplete: () => void }
     setFormError(null);
     window.localStorage.setItem(LS_NICKNAME, n);
     window.localStorage.setItem(LS_CONTACT, c);
+    setStage("character");
+  };
+
+  const confirmCharacter = (t: PlayerType) => {
+    setPlayerType(t);
+    window.localStorage.setItem(LS_PLAYER_TYPE, t);
     setStage("play");
   };
 
@@ -267,10 +278,71 @@ export default function WeddingRunner({ onComplete }: { onComplete: () => void }
     );
   }
 
+  if (stage === "character") {
+    const options: { type: PlayerType; label: string; src: string; sub: string }[] = [
+      { type: "bride", label: "신부", src: "/wedding-runner/bride.png", sub: "Bride" },
+      { type: "groom", label: "신랑", src: "/wedding-runner/groom.png", sub: "Groom" },
+    ];
+    return (
+      <Shell>
+        <p className="eyebrow text-center">Character</p>
+        <h2 className="mt-3 text-center text-[clamp(1.1rem,5vw,1.35rem)] text-[color:var(--color-charcoal)]">
+          캐릭터 선택
+        </h2>
+        <p className="mt-2 text-center text-[12px] text-[color:var(--color-mute)]">
+          오늘 달릴 주인공을 골라주세요
+        </p>
+        <div className="mt-6 grid grid-cols-2 gap-3">
+          {options.map((opt) => {
+            const active = playerType === opt.type;
+            return (
+              <button
+                key={opt.type}
+                type="button"
+                onClick={() => setPlayerType(opt.type)}
+                className={`flex flex-col items-center rounded-2xl border-2 px-3 py-4 transition-transform active:scale-[0.98] ${
+                  active
+                    ? "border-[color:var(--color-rose-deep)] bg-[color:var(--color-blush)]/60 shadow-md"
+                    : "border-[color:var(--color-rose)]/30 bg-white/70"
+                }`}
+              >
+                <div className="flex h-[150px] w-full items-end justify-center overflow-hidden rounded-xl bg-[color:var(--color-blush)]/30">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={opt.src}
+                    alt={opt.label}
+                    className="h-[150px] w-auto object-contain"
+                    style={{ imageRendering: "pixelated" }}
+                  />
+                </div>
+                <p className="mt-3 text-[14px] tracking-[0.16em] text-[color:var(--color-charcoal)]">{opt.label}</p>
+                <p className="text-[10px] tracking-[0.22em] text-[color:var(--color-mute)]">{opt.sub}</p>
+              </button>
+            );
+          })}
+        </div>
+        <div className="mt-6 flex gap-2">
+          <button
+            className="flex-1 rounded-full border border-[color:var(--color-rose)]/40 bg-white/70 px-4 py-2.5 text-[12px] tracking-[0.14em] text-[color:var(--color-rose-deep)]"
+            onClick={() => setStage("form")}
+          >
+            뒤로
+          </button>
+          <button
+            className="flex-1 rounded-full bg-[color:var(--color-rose-deep)] px-4 py-3 text-[13px] tracking-[0.16em] text-white"
+            onClick={() => confirmCharacter(playerType)}
+          >
+            출발
+          </button>
+        </div>
+      </Shell>
+    );
+  }
+
   if (stage === "play") {
     return (
       <div className="relative">
-        <PhaserGame onResult={handleResult} />
+        <PhaserGame onResult={handleResult} playerType={playerType} />
         <p className="mt-3 text-center text-[11px] tracking-widest text-[color:var(--color-mute)]">
           화면 위쪽 탭 = 점프 · 아래쪽 탭 = 슬라이드
         </p>

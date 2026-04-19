@@ -54,8 +54,9 @@ const OBSTACLE_PENALTY: Record<ObstacleKind, number> = {
 };
 
 type RunnerState = {
-  player: Phaser.GameObjects.Rectangle;
-  playerAccent: Phaser.GameObjects.Rectangle;
+  player: Phaser.GameObjects.Image;
+  playerW: number;
+  playerH: number;
   itemsPool: Array<{ rect: Phaser.GameObjects.Graphics; kind: ItemKind; x: number; y: number; alive: boolean; size: number }>;
   obstaclesPool: Array<{ rect: Phaser.GameObjects.Graphics; kind: ObstacleKind; x: number; y: number; alive: boolean; w: number; h: number }>;
   groundTiles: Phaser.GameObjects.Rectangle[];
@@ -155,8 +156,10 @@ function intersects(
 
 export default function PhaserGame({
   onResult,
+  playerType = "groom",
 }: {
   onResult: (r: GameResult) => void;
+  playerType?: "bride" | "groom";
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const gameRef = useRef<Phaser.Game | null>(null);
@@ -259,9 +262,10 @@ export default function PhaserGame({
         if (state.isJumping || state.sliding) return;
         state.sliding = true;
         state.slideUntil = scene.time.now + SLIDE_DURATION;
-        state.player!.setSize(40, 26);
-        state.player!.y = GROUND_Y - 13;
-        state.playerAccent!.setVisible(false);
+        state.playerH = 30;
+        const slideH = 38;
+        state.player!.setDisplaySize(56, slideH);
+        state.player!.y = GROUND_Y - slideH / 2;
       }
 
       function spawnItem(scene: Phaser.Scene) {
@@ -298,7 +302,10 @@ export default function PhaserGame({
       } = {
         key: "main",
         preload(this: Phaser.Scene) {
-          // 게임오버 씬에 띄울 오리지널 일러스트 (웨딩 16비트 CC0)
+          // 캐릭터 스프라이트 (오리지널 / 웨딩 16비트)
+          this.load.image("player-bride", "/wedding-runner/bride.png");
+          this.load.image("player-groom", "/wedding-runner/groom.png");
+          // 게임오버 씬에 띄울 오리지널 일러스트
           this.load.image("game-over", "/wedding-runner/game-over.png");
         },
         create(this: Phaser.Scene) {
@@ -322,11 +329,14 @@ export default function PhaserGame({
             state.groundTiles!.push(t);
           }
 
-          scene.add.ellipse(PLAYER_X, GROUND_Y + 6, 54, 10, PALETTE.ink, 0.25);
-          state.player = scene.add.rectangle(PLAYER_X, GROUND_Y - 26, 36, 52, PALETTE.groom);
-          state.player.setStrokeStyle(3, PALETTE.ink);
-          state.playerAccent = scene.add.rectangle(PLAYER_X, GROUND_Y - 46, 28, 14, PALETTE.bride);
-          state.playerAccent.setStrokeStyle(2, PALETTE.ink);
+          scene.add.ellipse(PLAYER_X, GROUND_Y + 6, 60, 12, PALETTE.ink, 0.25);
+          const PLAYER_W = 56;
+          const PLAYER_H = 92;
+          state.playerW = PLAYER_W;
+          state.playerH = PLAYER_H;
+          const textureKey = playerType === "bride" ? "player-bride" : "player-groom";
+          state.player = scene.add.image(PLAYER_X, GROUND_Y - PLAYER_H / 2, textureKey);
+          state.player.setDisplaySize(PLAYER_W, PLAYER_H);
 
           const hudStyle = { fontFamily: "monospace", fontSize: "18px", color: "#3a2430", fontStyle: "bold" };
           state.hudScore = scene.add.text(16, 16, "SCORE 0000", hudStyle);
@@ -373,22 +383,25 @@ export default function PhaserGame({
             if (t.x < -48) t.x += 16 * 48;
           }
 
+          const baseH = 92;
+          const baseY = GROUND_Y - baseH / 2;
           if (state.isJumping) {
             state.velocityY! += (GRAVITY * dt) / 1000;
             state.player!.y += (state.velocityY! * dt) / 1000;
-            state.playerAccent!.y = state.player!.y - 20;
-            if (state.player!.y >= GROUND_Y - 26) {
-              state.player!.y = GROUND_Y - 26;
-              state.playerAccent!.y = GROUND_Y - 46;
+            if (state.player!.y >= baseY) {
+              state.player!.y = baseY;
               state.isJumping = false;
               state.velocityY = 0;
             }
-          }
-          if (state.sliding && scene.time.now > state.slideUntil!) {
+          } else if (state.sliding && scene.time.now > state.slideUntil!) {
             state.sliding = false;
-            state.player!.setSize(36, 52);
-            state.player!.y = GROUND_Y - 26;
-            state.playerAccent!.setVisible(true);
+            state.playerH = baseH;
+            state.player!.setDisplaySize(56, baseH);
+            state.player!.y = baseY;
+          } else if (!state.sliding) {
+            // 달리기 호흡 — squash & stretch (땅 위에 있을 때만)
+            const wob = Math.sin(state.elapsed! / 90) * 0.05;
+            state.player!.setScale(state.player!.scaleX, (baseH / state.player!.height) * (1 + wob));
           }
 
           if (scene.time.now < (state.invincibleUntil ?? 0)) {
@@ -416,13 +429,15 @@ export default function PhaserGame({
             state.nextObstacleAt = state.elapsed + gap + Math.random() * 350;
           }
 
-          const playerH = state.sliding ? 26 : 52;
+          // hit box는 시각 크기보다 살짝 작게 — 캐릭터 폭 56→40, 슬라이드 시 30
+          const hitH = state.sliding ? 30 : 70;
+          const hitW = 40;
           for (const it of state.itemsPool!) {
             if (!it.alive) continue;
             it.x -= (speed * dt) / 1000;
             it.rect.x = it.x;
             if (it.x < -40) { it.alive = false; it.rect.destroy(); continue; }
-            if (intersects(PLAYER_X, state.player!.y, 36, playerH, it.x, it.y, it.size * 2, it.size * 2)) {
+            if (intersects(PLAYER_X, state.player!.y, hitW, hitH, it.x, it.y, it.size * 2, it.size * 2)) {
               it.alive = false;
               it.rect.destroy();
               const gained = ITEM_SCORE[it.kind];
@@ -441,7 +456,7 @@ export default function PhaserGame({
             ob.x -= (speed * dt) / 1000;
             ob.rect.x = ob.x;
             if (ob.x < -50) { ob.alive = false; ob.rect.destroy(); continue; }
-            const hit = intersects(PLAYER_X, state.player!.y, 36, playerH, ob.x, ob.y, ob.w, ob.h);
+            const hit = intersects(PLAYER_X, state.player!.y, hitW, hitH, ob.x, ob.y, ob.w, ob.h);
             if (hit) {
               ob.alive = false;
               ob.rect.destroy();
@@ -497,7 +512,7 @@ export default function PhaserGame({
       gameRef.current?.destroy(true);
       gameRef.current = null;
     };
-  }, []);
+  }, [playerType]);
 
   return (
     <div
