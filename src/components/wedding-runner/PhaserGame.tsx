@@ -69,6 +69,9 @@ type RunnerState = {
   slideUntil: number;
   invincibleUntil: number;
   confusedUntil: number;
+  // 신부 한정 — 피격/아이템 획득 시 일시적 표정 변경 타이머
+  hurtUntil: number;
+  happyUntil: number;
   scrollSpeed: number;
   nextItemAt: number;
   nextObstacleAt: number;
@@ -151,6 +154,8 @@ export default function PhaserGame({
         slideUntil: 0,
         invincibleUntil: 0,
         confusedUntil: 0,
+        hurtUntil: 0,
+        happyUntil: 0,
         scrollSpeed: 260,
         nextItemAt: 600,
         nextObstacleAt: 1400,
@@ -310,6 +315,14 @@ export default function PhaserGame({
           // 캐릭터 스프라이트 (오리지널 / 웨딩 16비트)
           this.load.image("player-bride", "/wedding-runner/bride.png");
           this.load.image("player-groom", "/wedding-runner/groom.png");
+          // 신부 애니메이션 프레임 (Ponyo Bride 시트에서 추출)
+          this.load.spritesheet("bride-run", "/wedding-runner/bride-run.png", {
+            frameWidth: 200,
+            frameHeight: 250,
+          });
+          this.load.image("bride-jump", "/wedding-runner/bride-jump.png");
+          this.load.image("bride-hurt", "/wedding-runner/bride-hurt.png");
+          this.load.image("bride-happy", "/wedding-runner/bride-happy.png");
           // 게임오버 씬에 띄울 오리지널 일러스트
           this.load.image("game-over", "/wedding-runner/game-over.png");
           // 스테이지1 배경 (마스터 제공 · 가로 타일링)
@@ -346,8 +359,11 @@ export default function PhaserGame({
           const PLAYER_H = 92;
           state.playerW = PLAYER_W;
           state.playerH = PLAYER_H;
-          const textureKey = playerType === "bride" ? "player-bride" : "player-groom";
-          state.player = scene.add.image(PLAYER_X, GROUND_Y - PLAYER_H / 2, textureKey);
+          // 신부: Run spritesheet 프레임 0으로 시작 — update에서 프레임 교차 애니
+          // 신랑: 아직 애니 시트 미공급 → 기존 정적 이미지 유지
+          const textureKey = playerType === "bride" ? "bride-run" : "player-groom";
+          const initialFrame = playerType === "bride" ? 0 : undefined;
+          state.player = scene.add.image(PLAYER_X, GROUND_Y - PLAYER_H / 2, textureKey, initialFrame);
           state.player.setDisplaySize(PLAYER_W, PLAYER_H);
 
           const hudStyle = { fontFamily: "monospace", fontSize: "18px", color: "#3a2430", fontStyle: "bold" };
@@ -397,15 +413,34 @@ export default function PhaserGame({
               state.isJumping = false;
               state.velocityY = 0;
             }
+            // 신부: 점프 프레임으로 교체 (공중 포즈 — JUMP CYCLE 3 PEAK)
+            if (playerType === "bride") {
+              state.player!.setTexture("bride-jump");
+              state.player!.setDisplaySize(state.playerW!, state.playerH!);
+            }
           } else if (state.sliding && scene.time.now > state.slideUntil!) {
             state.sliding = false;
             state.playerH = baseH;
             state.player!.setDisplaySize(56, baseH);
             state.player!.y = baseY;
           } else if (!state.sliding) {
-            // 달리기 호흡 — squash & stretch (땅 위에 있을 때만)
-            const wob = Math.sin(state.elapsed! / 90) * 0.05;
-            state.player!.setScale(state.player!.scaleX, (baseH / state.player!.height) * (1 + wob));
+            if (playerType === "bride") {
+              // 신부: 피격/행복 우선, 그외 달리기 2프레임 교차 (120ms)
+              const now = scene.time.now;
+              if (now < (state.hurtUntil ?? 0)) {
+                state.player!.setTexture("bride-hurt");
+              } else if (now < (state.happyUntil ?? 0)) {
+                state.player!.setTexture("bride-happy");
+              } else {
+                const fr = Math.floor((state.elapsed ?? 0) / 120) % 2;
+                state.player!.setTexture("bride-run", fr);
+              }
+              state.player!.setDisplaySize(state.playerW!, state.playerH!);
+            } else {
+              // 신랑: 달리기 호흡 — squash & stretch (정적 이미지 대응)
+              const wob = Math.sin(state.elapsed! / 90) * 0.05;
+              state.player!.setScale(state.player!.scaleX, (baseH / state.player!.height) * (1 + wob));
+            }
           }
 
           if (scene.time.now < (state.invincibleUntil ?? 0)) {
@@ -457,6 +492,8 @@ export default function PhaserGame({
               if (state.combo === 5) state.scoreValue! += 50;
               if (state.combo === 10) state.scoreValue! += 150;
               if (it.kind === "champagne") state.invincibleUntil = scene.time.now + 3000;
+              // 신부: 아이템 획득 시 HAPPY 포즈 500ms
+              state.happyUntil = scene.time.now + 500;
             }
           }
 
@@ -482,11 +519,14 @@ export default function PhaserGame({
                 if (invincible) continue;
                 state.scoreValue! -= OBSTACLE_PENALTY.glass;
                 state.combo = 0;
+                // 신부: 피격 시 HURT 포즈 700ms
+                state.hurtUntil = scene.time.now + 700;
               } else {
                 if (invincible) continue;
                 state.scoreValue! -= OBSTACLE_PENALTY.flower;
                 state.combo = 0;
                 state.confusedUntil = scene.time.now + 2000;
+                state.hurtUntil = scene.time.now + 700;
               }
             }
           }
