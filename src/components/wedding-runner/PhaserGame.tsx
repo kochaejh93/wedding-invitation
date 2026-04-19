@@ -61,6 +61,15 @@ type RunnerState = {
   hudTime: Phaser.GameObjects.Text;
   hudCombo: Phaser.GameObjects.Text;
   hudStatus: Phaser.GameObjects.Text;
+  hudSpeed: Phaser.GameObjects.Text;
+  // 무적 모드 별도 HUD — 배너 + 남은 시간 게이지
+  invincBanner: Phaser.GameObjects.Container;
+  invincBarBg: Phaser.GameObjects.Rectangle;
+  invincBarFill: Phaser.GameObjects.Rectangle;
+  invincAura: Phaser.GameObjects.Arc;
+  // 가속 램프 피드백 — 스텝 바뀔 때 중앙 팝업
+  speedPopup: Phaser.GameObjects.Text;
+  speedStep: number;
   scoreValue: number;
   itemScoreValue: number;
   combo: number;
@@ -162,6 +171,7 @@ export default function PhaserGame({
         nextItemAt: 600,
         nextObstacleAt: 1400,
         finished: false,
+        speedStep: 0,
       };
 
       function finish(this: Phaser.Scene, completed: boolean) {
@@ -401,6 +411,48 @@ export default function PhaserGame({
           state.hudTime = scene.add.text(VIEW_W - 16, 16, `TIME ${GAME_DURATION_SEC}`, hudStyle).setOrigin(1, 0);
           state.hudCombo = scene.add.text(16, 40, "", hudStyle);
           state.hudStatus = scene.add.text(VIEW_W / 2, 40, "", { ...hudStyle, fontSize: "14px", color: "#c85476" }).setOrigin(0.5, 0);
+          // 속도 단계 HUD — 10초마다 1레벨씩 증가
+          state.hudSpeed = scene.add.text(VIEW_W - 16, 40, "SPEED LV.1", {
+            ...hudStyle,
+            fontSize: "13px",
+            color: "#c85476",
+          }).setOrigin(1, 0);
+
+          // ── 무적 모드 별도 HUD (기본 비활성) ──
+          // 1) 플레이어 발밑 금빛 오라
+          state.invincAura = scene.add.circle(PLAYER_X, GROUND_Y - PLAYER_H / 2, 64, 0xffd54f, 0.28);
+          state.invincAura.setStrokeStyle(3, 0xffb300, 0.85);
+          state.invincAura.setDepth(1);
+          state.invincAura.setVisible(false);
+          // 2) 상단 중앙 배너 (컨테이너)
+          const bannerBg = scene.add.rectangle(0, 0, 220, 38, 0xffd54f, 0.92)
+            .setStrokeStyle(3, 0xff8f00, 1);
+          const bannerText = scene.add.text(0, -1, "★ 무적 모드 ★", {
+            fontFamily: "'Apple SD Gothic Neo', 'Noto Sans KR', 'Pretendard', sans-serif",
+            fontSize: "18px",
+            color: "#ff6f00",
+            fontStyle: "bold",
+            stroke: "#fff8e1",
+            strokeThickness: 3,
+          }).setOrigin(0.5);
+          // 3) 배너 하단 남은 시간 게이지
+          state.invincBarBg = scene.add.rectangle(0, 22, 200, 6, 0x5d4037, 0.45);
+          state.invincBarFill = scene.add.rectangle(-100, 22, 0, 6, 0xff6f00, 1).setOrigin(0, 0.5);
+          state.invincBanner = scene.add.container(VIEW_W / 2, 76, [
+            bannerBg, bannerText, state.invincBarBg, state.invincBarFill,
+          ]);
+          state.invincBanner.setDepth(200);
+          state.invincBanner.setVisible(false);
+
+          // ── 가속 램프 팝업 (기본 비활성) ──
+          state.speedPopup = scene.add.text(VIEW_W / 2, VIEW_H / 2 - 40, "", {
+            fontFamily: "'Apple SD Gothic Neo', 'Noto Sans KR', 'Pretendard', sans-serif",
+            fontSize: "42px",
+            color: "#ffffff",
+            fontStyle: "bold",
+            stroke: "#c85476",
+            strokeThickness: 8,
+          }).setOrigin(0.5).setDepth(180).setAlpha(0);
 
           scene.input.on("pointerdown", () => {
             if (state.finished) return;
@@ -420,6 +472,28 @@ export default function PhaserGame({
           const baseSpeed = 240;
           const stepIdx = Math.floor(state.survivalTime / 10);
           state.scrollSpeed = Math.min(520, baseSpeed * Math.pow(1.12, stepIdx));
+          // 속도 스텝 변경 감지 → HUD 갱신 + 중앙 팝업 1.2초 페이드
+          if (stepIdx !== state.speedStep) {
+            state.speedStep = stepIdx;
+            state.hudSpeed!.setText(`SPEED LV.${stepIdx + 1}`);
+            if (stepIdx > 0 && state.speedPopup) {
+              state.speedPopup.setText(`SPEED UP!  LV.${stepIdx + 1}`);
+              state.speedPopup.setAlpha(1);
+              state.speedPopup.setScale(0.6);
+              scene.tweens.add({
+                targets: state.speedPopup,
+                scale: 1.1,
+                duration: 200,
+                ease: "Back.Out",
+              });
+              scene.tweens.add({
+                targets: state.speedPopup,
+                alpha: 0,
+                duration: 600,
+                delay: 600,
+              });
+            }
+          }
 
           const speed = state.scrollSpeed!;
           // 배경 tileSprite 좌측으로 흐름 (메인 스크롤)
@@ -452,16 +526,32 @@ export default function PhaserGame({
             }
           }
 
-          if (scene.time.now < (state.invincibleUntil ?? 0)) {
-            state.player!.alpha = Math.floor(scene.time.now / 80) % 2 === 0 ? 1 : 0.4;
+          const invincOn = scene.time.now < (state.invincibleUntil ?? 0);
+          if (invincOn) {
+            // 플레이어 자체는 깜빡임 대신 옅은 골든 tint — 오라가 따로 뜨므로 과노출 방지
+            state.player!.alpha = 1;
+            state.hudStatus!.setText("");
+            // 플레이어 발밑 금빛 오라 (플레이어 위치 따라 이동)
+            if (state.invincAura) {
+              state.invincAura.setVisible(true);
+              state.invincAura.x = state.player!.x;
+              state.invincAura.y = state.player!.y + 6;
+              // 맥박
+              const pulse = 1 + Math.sin(scene.time.now / 120) * 0.12;
+              state.invincAura.setScale(pulse);
+            }
+            // 배너 + 게이지
+            if (state.invincBanner) {
+              state.invincBanner.setVisible(true);
+              const remaining = Math.max(0, (state.invincibleUntil ?? 0) - scene.time.now);
+              const ratio = Math.max(0, Math.min(1, remaining / 3000));
+              state.invincBarFill!.width = 200 * ratio;
+            }
           } else {
             state.player!.alpha = 1;
-          }
-
-          if (scene.time.now < (state.invincibleUntil ?? 0)) {
-            state.hudStatus!.setText("무적!");
-          } else {
             state.hudStatus!.setText("");
+            if (state.invincAura) state.invincAura.setVisible(false);
+            if (state.invincBanner) state.invincBanner.setVisible(false);
           }
 
           if (state.elapsed >= state.nextItemAt!) {
@@ -520,6 +610,10 @@ export default function PhaserGame({
               const invincible = scene.time.now < (state.invincibleUntil ?? 0);
               if (ob.kind === "cake") {
                 if (invincible) continue;
+                // 게임오버 전환 전에 캐릭터 hurt 포즈 강제 — 마지막 프레임이 run에서 멈춰
+                // "왜 표정이 그대로?" 지적되던 부분 해소.
+                state.hurtUntil = scene.time.now + 4000;
+                applyTexture(`${playerType}-hurt`);
                 finish.call(scene, false);
                 return;
               } else if (ob.kind === "glass") {

@@ -146,10 +146,14 @@ body {
 }
 
 /* 웨딩러너 캐릭터 선택 화면 — 스프라이트시트 러닝 애니메이션
-   원본 시트: 400x250(2프레임) · 표시 크기: 280x175(프레임당 140x175) */
+   원본 시트: 400x250(2프레임) · 표시 크기: 280x175(프레임당 140x175)
+   steps(2, end)는 [from,to] 구간을 2등분해 프레임1이 -70px에 걸쳐
+   "캐릭터가 반쪽만 보임" 증상 유발. to를 -280px(전체 2프레임 끝)까지
+   확장하고 steps 종결점을 프레임 경계(0 / -140px)에 떨어뜨려 정상 루프. */
 @keyframes wr-run-cycle {
-  from { background-position-x: 0; }
-  to { background-position-x: -140px; }
+  0%   { background-position-x: 0; }
+  50%  { background-position-x: -140px; }
+  100% { background-position-x: -280px; }
 }
 .wr-run-sprite {
   width: 140px;
