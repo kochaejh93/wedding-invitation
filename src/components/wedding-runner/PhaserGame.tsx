@@ -51,8 +51,8 @@ type RunnerState = {
   playerW: number;
   playerH: number;
   bg: Phaser.GameObjects.TileSprite;
-  itemsPool: Array<{ sprite: Phaser.GameObjects.Image; kind: ItemKind; x: number; y: number; alive: boolean; w: number; h: number }>;
-  obstaclesPool: Array<{ sprite: Phaser.GameObjects.Image; kind: ObstacleKind; x: number; y: number; alive: boolean; w: number; h: number }>;
+  itemsPool: Array<{ sprite: Phaser.GameObjects.Image; halo: Phaser.GameObjects.Arc; kind: ItemKind; x: number; y: number; alive: boolean; w: number; h: number }>;
+  obstaclesPool: Array<{ sprite: Phaser.GameObjects.Image; warn: Phaser.GameObjects.Text; kind: ObstacleKind; x: number; y: number; alive: boolean; w: number; h: number }>;
   hudScore: Phaser.GameObjects.Text;
   hudTime: Phaser.GameObjects.Text;
   hudCombo: Phaser.GameObjects.Text;
@@ -176,16 +176,21 @@ export default function PhaserGame({
         };
 
         // 게임오버(케이크 충돌) 시: 캐릭터 창 안에서 오버레이 이미지 + 한글 텍스트 노출 후 결과로 전환
-        if (!completed && scene.textures.exists("game-over")) {
+        if (!completed) {
           const dim = scene.add.rectangle(VIEW_W / 2, VIEW_H / 2, VIEW_W, VIEW_H, 0x000000, 0.55);
           dim.setDepth(100);
 
-          const img = scene.add.image(VIEW_W / 2, VIEW_H / 2 - 40, "game-over");
-          img.setDepth(101);
-          const maxW = VIEW_W - 60;
-          const maxH = VIEW_H * 0.55;
-          const fit = Math.min(maxW / img.width, maxH / img.height, 1);
-          img.setScale(fit);
+          const hasImg = scene.textures.exists("game-over");
+          if (!hasImg) {
+            console.warn("[WeddingRunner] game-over 텍스처 없음 — 텍스트 폴백만 표시");
+          } else {
+            const img = scene.add.image(VIEW_W / 2, VIEW_H / 2 - 40, "game-over");
+            img.setDepth(101);
+            const maxW = VIEW_W - 60;
+            const maxH = VIEW_H * 0.55;
+            const fit = Math.min(maxW / img.width, maxH / img.height, 1);
+            img.setScale(fit);
+          }
 
           scene.add.text(VIEW_W / 2, VIEW_H - 150, "게임 오버", {
             fontFamily: "'Apple SD Gothic Neo', 'Noto Sans KR', 'Pretendard', sans-serif",
@@ -233,16 +238,24 @@ export default function PhaserGame({
         const aerial = kind === "heart" || kind === "ring" || Math.random() < 0.4;
         const targetH = ITEM_HEIGHT[kind];
         const y = aerial ? GROUND_Y - 90 - Math.random() * 80 : GROUND_Y - targetH / 2;
+
+        // 아이템 뒤에 노란 halo 원 — "획득 가능" 시각 신호
+        const haloR = Math.max(targetH, 32) * 0.7;
+        const halo = scene.add.circle(VIEW_W + 30, y, haloR, 0xffeb3b, 0.45);
+        halo.setStrokeStyle(2, 0xffc107, 0.85);
+        halo.setDepth(-1);
+
         const img = scene.add.image(VIEW_W + 30, y, ITEM_TEXTURE[kind]);
         // 세로 기준 맞춤 — 원본 비율 유지
         const scale = targetH / img.height;
         img.setScale(scale);
         const w = img.width * scale;
-        state.itemsPool!.push({ sprite: img, kind, x: img.x, y: img.y, alive: true, w, h: targetH });
+        state.itemsPool!.push({ sprite: img, halo, kind, x: img.x, y: img.y, alive: true, w, h: targetH });
       }
 
       function spawnObstacle(scene: Phaser.Scene) {
-        const kinds: ObstacleKind[] = ["glass", "glass", "flower", "flower", "cake"];
+        // cake = 즉사 장애물 — 확률 증가 (게임오버 연출 자주 발동)
+        const kinds: ObstacleKind[] = ["glass", "glass", "flower", "cake", "cake"];
         const kind = kinds[Math.floor(Math.random() * kinds.length)];
         const targetH = OBSTACLE_HEIGHT[kind];
         // 바닥에 딱 붙게 배치
@@ -250,8 +263,21 @@ export default function PhaserGame({
         const img = scene.add.image(VIEW_W + 30, y, OBSTACLE_TEXTURE[kind]);
         const scale = targetH / img.height;
         img.setScale(scale);
+        // 장애물은 빨간 tint로 "위험" 시각 신호 — 아이템(원본색)과 구분
+        img.setTint(0xff5a5a);
         const w = img.width * scale;
-        state.obstaclesPool!.push({ sprite: img, kind, x: img.x, y: img.y, alive: true, w, h: targetH });
+
+        // 장애물 위 "!" 경고 마커
+        const warn = scene.add.text(img.x, y - targetH / 2 - 14, "!", {
+          fontFamily: "monospace",
+          fontSize: "20px",
+          color: "#ff1744",
+          fontStyle: "bold",
+          stroke: "#ffffff",
+          strokeThickness: 3,
+        }).setOrigin(0.5);
+        warn.setDepth(5);
+        state.obstaclesPool!.push({ sprite: img, warn, kind, x: img.x, y: img.y, alive: true, w, h: targetH });
       }
 
       const sceneConfig: Phaser.Types.Scenes.SettingsConfig & {
@@ -261,6 +287,10 @@ export default function PhaserGame({
       } = {
         key: "main",
         preload(this: Phaser.Scene) {
+          // 에셋 로드 실패 로깅 — 게임오버 이미지 누락 디버깅용
+          this.load.on("loaderror", (file: { key: string; url?: string }) => {
+            console.error("[WeddingRunner] 에셋 로드 실패:", file.key, file.url);
+          });
           // 캐릭터 스프라이트 (오리지널 / 웨딩 16비트)
           this.load.image("player-bride", "/wedding-runner/bride.png");
           this.load.image("player-groom", "/wedding-runner/groom.png");
@@ -394,10 +424,15 @@ export default function PhaserGame({
             if (!it.alive) continue;
             it.x -= (speed * dt) / 1000;
             it.sprite.x = it.x;
-            if (it.x < -60) { it.alive = false; it.sprite.destroy(); continue; }
+            it.halo.x = it.x;
+            // halo 살짝 맥박 — 획득 가능 어필
+            const pulse = 1 + Math.sin(state.elapsed! / 140) * 0.08;
+            it.halo.setScale(pulse);
+            if (it.x < -60) { it.alive = false; it.sprite.destroy(); it.halo.destroy(); continue; }
             if (intersects(PLAYER_X, state.player!.y, hitW, hitH, it.x, it.y, it.w, it.h)) {
               it.alive = false;
               it.sprite.destroy();
+              it.halo.destroy();
               const gained = ITEM_SCORE[it.kind];
               state.scoreValue! += gained;
               state.itemScoreValue! += gained;
@@ -413,11 +448,15 @@ export default function PhaserGame({
             if (!ob.alive) continue;
             ob.x -= (speed * dt) / 1000;
             ob.sprite.x = ob.x;
-            if (ob.x < -80) { ob.alive = false; ob.sprite.destroy(); continue; }
+            ob.warn.x = ob.x;
+            // 경고 마커 깜빡임
+            ob.warn.alpha = Math.floor(scene.time.now / 180) % 2 === 0 ? 1 : 0.35;
+            if (ob.x < -80) { ob.alive = false; ob.sprite.destroy(); ob.warn.destroy(); continue; }
             const hit = intersects(PLAYER_X, state.player!.y, hitW, hitH, ob.x, ob.y, ob.w, ob.h);
             if (hit) {
               ob.alive = false;
               ob.sprite.destroy();
+              ob.warn.destroy();
               const invincible = scene.time.now < (state.invincibleUntil ?? 0);
               if (ob.kind === "cake") {
                 if (invincible) continue;
