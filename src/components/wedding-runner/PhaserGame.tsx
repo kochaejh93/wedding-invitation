@@ -169,7 +169,7 @@ export default function PhaserGame({
 
     (async () => {
       const PhaserMod = await import("phaser");
-      const Phaser = PhaserMod.default;
+      const Phaser = (PhaserMod as unknown as { default?: typeof PhaserMod }).default ?? PhaserMod;
       if (cancelled || !containerRef.current) return;
 
       const state: Partial<RunnerState> = {
